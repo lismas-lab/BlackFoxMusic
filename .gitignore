@@ -1,0 +1,27 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.kotlin
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Output builds
+app/build/
+build/
+
+# Temporary / scratch
+klischa_*
+test_*.py
+*.log
+__pycache__/
+*.pyc

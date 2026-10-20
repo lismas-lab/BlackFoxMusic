@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Black Fox</string>
+    <string name="search_hint">Поиск треков, альбомов, артистов...</string>
+    <string name="favorites">Избранное</string>
+    <string name="playlists">Мои плейлисты</string>
+    <string name="downloads">Оффлайн</string>
+</resources>
