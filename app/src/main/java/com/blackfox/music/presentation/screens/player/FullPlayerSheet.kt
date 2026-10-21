@@ -3,6 +3,8 @@ package com.blackfox.music.presentation.screens.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ import kotlinx.coroutines.withContext
 /**
  * Полноэкранный плеер в стиле Liquid Glass с текстами песен и переходом к артисту
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullPlayerSheet(
     track: Track,
@@ -54,6 +57,7 @@ fun FullPlayerSheet(
     onCloseClick: () -> Unit,
     onArtistClick: (artistName: String, artistId: String?) -> Unit = { _, _ -> },
     onAlbumClick: (albumTitle: String, albumId: String?) -> Unit = { _, _ -> },
+    onSwitchToTrack: (Track) -> Unit = {},
     repository: InnerTubeRepository = remember { InnerTubeRepository() },
     modifier: Modifier = Modifier
 ) {
@@ -63,9 +67,28 @@ fun FullPlayerSheet(
     var isLyricsLoading by remember { mutableStateOf(false) }
     var lyricsLoadedTrackId by remember { mutableStateOf<String?>(null) }
 
+    var isUncensoredSheetVisible by remember { mutableStateOf(false) }
+    var uncensoredVideos by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var isUncensoredLoading by remember { mutableStateOf(false) }
+
     var resolvedAlbumId by remember(track.id) { mutableStateOf(track.albumId) }
     var resolvedAlbumTitle by remember(track.id) { mutableStateOf(track.album) }
     var isResolvingAlbum by remember(track.id) { mutableStateOf(false) }
+
+    LaunchedEffect(isUncensoredSheetVisible, track.id) {
+        if (isUncensoredSheetVisible) {
+            isUncensoredLoading = true
+            try {
+                val query = "${track.artist} ${track.title}"
+                val results = repository.searchVideos(query, limit = 10)
+                uncensoredVideos = results
+            } catch (_: Exception) {
+                uncensoredVideos = emptyList()
+            } finally {
+                isUncensoredLoading = false
+            }
+        }
+    }
 
     LaunchedEffect(track.id) {
         resolvedAlbumId = track.albumId
@@ -388,6 +411,31 @@ fun FullPlayerSheet(
                             )
                         }
                     }
+
+                    // Кнопка поиска версии без цензуры (Видеоклип / Официальное видео)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x18FFFFFF))
+                            .clickable { isUncensoredSheetVisible = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = "Без цензуры (Видео)",
+                            tint = accentColor,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Версия без цензуры (Видео)",
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
                 // Кнопка Лайк
@@ -518,6 +566,183 @@ fun FullPlayerSheet(
                         tint = if (isLyricsMode) accentColor else TextSecondary,
                         modifier = Modifier.size(26.dp)
                     )
+                }
+            }
+        }
+
+        // Шторка выбора версии без цензуры (Видеоклипы / Официальные премьеры)
+        if (isUncensoredSheetVisible) {
+            ModalBottomSheet(
+                onDismissRequest = { isUncensoredSheetVisible = false },
+                containerColor = Color(0xF20F1117),
+                scrimColor = Color.Black.copy(alpha = 0.65f),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 12.dp)
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.White.copy(alpha = 0.2f))
+                    )
+                }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                        .navigationBarsPadding()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Videocam,
+                                contentDescription = null,
+                                tint = accentColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Версии без цензуры (Видео)",
+                                color = TextPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Официальные клипы и премьеры с чистым звуком",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (isUncensoredLoading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = accentColor, modifier = Modifier.size(36.dp))
+                        }
+                    } else if (uncensoredVideos.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Видеоверсий для этого трека не найдено",
+                                color = TextSecondary,
+                                fontSize = 14.sp
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 380.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(uncensoredVideos, key = { it.id }) { video ->
+                                val isCurrent = video.id == track.id
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (isCurrent) accentColor.copy(alpha = 0.15f) else Color(0x12FFFFFF))
+                                        .clickable {
+                                            isUncensoredSheetVisible = false
+                                            onSwitchToTrack(video)
+                                        }
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Обложка видео
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 72.dp, height = 48.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(ObsidianCard)
+                                    ) {
+                                        AsyncImage(
+                                            model = video.thumbnailUrl,
+                                            contentDescription = video.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        if (video.duration.isNotBlank()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                    .background(Color.Black.copy(alpha = 0.75f))
+                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                            ) {
+                                                Text(
+                                                    text = video.duration,
+                                                    color = Color.White,
+                                                    fontSize = 9.sp
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = video.title,
+                                            color = if (isCurrent) accentColor else TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = video.artist,
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    IconButton(
+                                        onClick = {
+                                            isUncensoredSheetVisible = false
+                                            onSwitchToTrack(video)
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCurrent && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = "Включить эту версию",
+                                            tint = accentColor,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

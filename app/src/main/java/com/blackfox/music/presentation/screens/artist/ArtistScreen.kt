@@ -182,6 +182,9 @@ fun ArtistScreen(
                 when (selectedTab) {
                     // ВКЛАДКА 1: ОБЗОР
                     ArtistTab.OVERVIEW -> {
+                        val sortedAlbums = remember(artist.albums) {
+                            artist.albums.sortedByDescending { it.year.toIntOrNull() ?: 0 }
+                        }
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(bottom = 120.dp),
@@ -371,8 +374,8 @@ fun ArtistScreen(
                                 }
                             }
 
-                            // Раздел: Альбомы и синглы
-                            if (artist.albums.isNotEmpty()) {
+                            // Раздел: Альбомы и синглы (сортировка по дате: самые свежие сверху)
+                            if (sortedAlbums.isNotEmpty()) {
                                 item {
                                     Text(
                                         text = "Альбомы и синглы",
@@ -383,7 +386,7 @@ fun ArtistScreen(
                                     )
                                 }
 
-                                items(artist.albums, key = { it.browseId }) { album ->
+                                items(sortedAlbums, key = { it.browseId }) { album ->
                                     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                                         AlbumListItem(
                                             album = album,

@@ -881,6 +881,17 @@ class MainActivity : ComponentActivity() {
                                 onFavoriteToggle = { toggleFavorite(track) },
                                 onDownloadClick = { downloadManager.downloadTrack(track) },
                                 onAddToPlaylistClick = { trackForPlaylistSheet = track },
+                                onSwitchToTrack = { uncensoredTrack ->
+                                    val queue = playerManager.currentQueue.value
+                                    val idx = queue.indexOfFirst { it.id == track.id }
+                                    if (idx != -1) {
+                                        val updatedQueue = queue.toMutableList()
+                                        updatedQueue[idx] = uncensoredTrack
+                                        playerManager.setQueueAndPlay(updatedQueue, idx)
+                                    } else {
+                                        playerManager.setQueueAndPlay(listOf(uncensoredTrack) + queue, 0)
+                                    }
+                                },
                                 onCloseClick = { isFullPlayerVisible = false },
                                 onArtistClick = { name, id ->
                                     isFullPlayerVisible = false

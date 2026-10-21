@@ -73,9 +73,10 @@ class PlaylistRepository(
                 )
             )
         }
-        val nextPos = musicDao.getNextOrderPosition(playlistId)
+        val minPos = musicDao.getMinOrderPosition(playlistId) ?: 0
+        val targetPos = minPos - 1
         musicDao.addTrackToPlaylist(
-            PlaylistTrackCrossRef(playlistId = playlistId, trackId = track.id, orderPosition = nextPos)
+            PlaylistTrackCrossRef(playlistId = playlistId, trackId = track.id, orderPosition = targetPos)
         )
         // Автоматически скачиваем трек при добавлении в плейлист
         downloadManager.downloadTrack(track)
@@ -114,7 +115,8 @@ class PlaylistRepository(
         val existing = musicDao.getTrackById(track.id)
         val newFav = !(existing?.isFavorite ?: false)
         if (newFav) {
-            val maxPos = musicDao.getMaxFavoriteOrder() ?: -1
+            val minPos = musicDao.getMinFavoriteOrder() ?: 0
+            val targetPos = minPos - 1
             if (existing == null) {
                 musicDao.insertTrack(
                     TrackEntity(
@@ -125,12 +127,12 @@ class PlaylistRepository(
                         duration = track.duration,
                         thumbnailUrl = track.thumbnailUrl,
                         isFavorite = true,
-                        favoriteOrderPosition = maxPos + 1
+                        favoriteOrderPosition = targetPos
                     )
                 )
             } else {
                 musicDao.updateFavorite(track.id, true)
-                musicDao.updateFavoriteOrder(track.id, maxPos + 1)
+                musicDao.updateFavoriteOrder(track.id, targetPos)
             }
             downloadManager.downloadTrack(track)
         } else {

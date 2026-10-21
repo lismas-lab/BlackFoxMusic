@@ -20,6 +20,7 @@ import com.blackfox.music.domain.model.Album
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.components.AddToPlaylistBottomSheet
 import com.blackfox.music.presentation.components.AlbumGridItem
+import com.blackfox.music.presentation.components.VideoGridItem
 import com.blackfox.music.presentation.components.GlassSearchBar
 import com.blackfox.music.presentation.components.GlowingFoxLogo
 import com.blackfox.music.data.download.DownloadProgress
@@ -71,12 +72,13 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Чипы фильтрации (Все, Песни, Альбомы)
-            Row(
+            // Чипы фильтрации (Все, Песни, Видео, Артисты, Альбомы)
+            LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                SearchFilter.entries.forEach { filter ->
+                items(SearchFilter.entries) { filter ->
                     val isSelected = selectedFilter == filter
                     Box(
                         modifier = Modifier
@@ -167,6 +169,31 @@ fun SearchScreen(
                             onDownloadClick = { onDownloadTrack(track) },
                             downloadProgress = progress
                         )
+                    }
+                }
+
+                // Раздел Видеоклипов / Без цензуры
+                if (uiState.videos.isNotEmpty() && selectedFilter == SearchFilter.ALL) {
+                    item {
+                        Text(
+                            text = "Видеоклипы и версии без цензуры",
+                            color = TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                        )
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            items(uiState.videos) { video ->
+                                VideoGridItem(
+                                    video = video,
+                                    onVideoClick = { onTrackPlay(video) }
+                                )
+                            }
+                        }
                     }
                 }
             }

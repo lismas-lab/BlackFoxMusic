@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 enum class SearchFilter(val label: String) {
     ALL("Все"),
     SONGS("Песни"),
+    VIDEOS("Видео (без цензуры)"),
     ARTISTS("Артисты"),
     ALBUMS("Альбомы")
 }
@@ -25,6 +26,7 @@ enum class SearchFilter(val label: String) {
 data class SearchUiState(
     val isLoading: Boolean = false,
     val tracks: List<Track> = emptyList(),
+    val videos: List<Track> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val albums: List<Album> = emptyList(),
     val error: String? = null
@@ -115,11 +117,13 @@ class SearchViewModel(
                 when (filter) {
                     SearchFilter.ALL -> {
                         val songs = repository.searchTracks(searchQuery, limit = 10)
+                        val videos = repository.searchVideos(searchQuery, limit = 8)
                         val artists = repository.searchArtists(searchQuery, limit = 6)
                         val albums = repository.searchAlbums(searchQuery, limit = 8)
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = songs,
+                            videos = videos,
                             artists = artists,
                             albums = albums
                         )
@@ -129,6 +133,17 @@ class SearchViewModel(
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = songs,
+                            videos = emptyList(),
+                            artists = emptyList(),
+                            albums = emptyList()
+                        )
+                    }
+                    SearchFilter.VIDEOS -> {
+                        val videos = repository.searchVideos(searchQuery, limit = 25)
+                        uiState.value = SearchUiState(
+                            isLoading = false,
+                            tracks = videos,
+                            videos = videos,
                             artists = emptyList(),
                             albums = emptyList()
                         )
@@ -138,6 +153,7 @@ class SearchViewModel(
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = emptyList(),
+                            videos = emptyList(),
                             artists = artists,
                             albums = emptyList()
                         )
@@ -147,6 +163,7 @@ class SearchViewModel(
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = emptyList(),
+                            videos = emptyList(),
                             artists = emptyList(),
                             albums = albums
                         )

@@ -60,6 +60,9 @@ interface MusicDao {
     @Query("SELECT MAX(favoriteOrderPosition) FROM tracks WHERE isFavorite = 1")
     suspend fun getMaxFavoriteOrder(): Int?
 
+    @Query("SELECT MIN(favoriteOrderPosition) FROM tracks WHERE isFavorite = 1")
+    suspend fun getMinFavoriteOrder(): Int?
+
     // --- ЗАГРУЖЕННЫЕ ПОЛЬЗОВАТЕЛЕМ ТРЕКИ ---
     @Query("SELECT * FROM tracks WHERE isUserUploaded = 1 ORDER BY rowid DESC")
     fun getUserUploadedTracks(): Flow<List<TrackEntity>>
@@ -132,6 +135,9 @@ interface MusicDao {
 
     @Query("SELECT COALESCE(MAX(orderPosition), -1) + 1 FROM playlist_track_cross_ref WHERE playlistId = :playlistId")
     suspend fun getNextOrderPosition(playlistId: Long): Int
+
+    @Query("SELECT MIN(orderPosition) FROM playlist_track_cross_ref WHERE playlistId = :playlistId")
+    suspend fun getMinOrderPosition(playlistId: Long): Int?
 
     @Query("UPDATE playlist_track_cross_ref SET orderPosition = :orderPosition WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun updateTrackOrder(playlistId: Long, trackId: String, orderPosition: Int)

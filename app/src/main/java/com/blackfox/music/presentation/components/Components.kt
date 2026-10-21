@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -537,6 +538,95 @@ fun AlbumGridItem(
             text = "${album.artist}${if (album.year.isNotBlank()) " • ${album.year}" else ""}",
             color = TextSecondary,
             fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * Карточка видеоклипа / видео-версии без цензуры для горизонтальной карусели в разделе "Все"
+ */
+@Composable
+fun VideoGridItem(
+    video: Track,
+    onVideoClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accentColor = LocalAccentTheme.current.primary
+    Column(
+        modifier = modifier
+            .width(200.dp)
+            .liquidGlass(cornerRadius = 18.dp)
+            .clickable(onClick = onVideoClick)
+            .padding(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(115.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(ObsidianCard)
+        ) {
+            AsyncImage(
+                model = video.thumbnailUrl,
+                contentDescription = video.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Бейдж длительности
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (video.duration.isNotBlank()) video.duration else "Видео",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            // Кнопка Play поверх видео
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Слушать",
+                    tint = accentColor,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = video.title,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = video.artist,
+            color = TextSecondary,
+            fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

@@ -182,6 +182,135 @@ class InnerTubeRepository {
         tracks
     }
 
+    /**
+     * Поиск музыкальных видео и официальных клипов/премьер в категории "Видео" (Music Videos).
+     * Используется для нахождения оригинальных версий без цензуры (uncensored), премьерных релизов
+     * и видеоклипов с полноценным студийным звуком без Radio Edit запикиваний.
+     */
+    suspend fun searchVideos(query: String, limit: Int = 20): List<Track> = withContext(Dispatchers.IO) {
+        val payload = JSONObject().apply {
+            put("query", query)
+            put("params", "EgWKAQIQAWoKEAkQBRAKEAMQBA%3D%3D") // Фильтр только видео (Videos / Music Videos)
+        }
+        val response = sendRequest("search", payload)
+        val videos = mutableListOf<Track>()
+
+        val tabs = response.optJSONObject("contents")
+            ?.optJSONObject("tabbedSearchResultsRenderer")
+            ?.optJSONArray("tabs") ?: return@withContext emptyList()
+
+        val sections = tabs.optJSONObject(0)
+            ?.optJSONObject("tabRenderer")
+            ?.optJSONObject("content")
+            ?.optJSONObject("sectionListRenderer")
+            ?.optJSONArray("contents") ?: return@withContext emptyList()
+
+        for (i in 0 until sections.length()) {
+            val section = sections.getJSONObject(i)
+            val items = section.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
+                ?: section.optJSONObject("itemSectionRenderer")?.optJSONArray("contents")
+                ?: continue
+
+            for (j in 0 until items.length()) {
+                val mir = items.getJSONObject(j).optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                val cols = mir.optJSONArray("flexColumns") ?: continue
+                if (cols.length() == 0) continue
+
+                // 1. Title
+                val title = cols.getJSONObject(0)
+                    .getJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                    .getJSONObject("text")
+                    .getJSONArray("runs")
+                    .getJSONObject(0)
+                    .getString("text")
+
+                // 2. Artist, Channel, Views, Duration
+                val detailsRuns = if (cols.length() > 1) {
+                    cols.getJSONObject(1)
+                        .getJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                        .getJSONObject("text")
+                        .optJSONArray("runs") ?: JSONArray()
+                } else JSONArray()
+
+                var artist = "Unknown"
+                var artistId: String? = null
+                var duration = ""
+
+                val runTexts = mutableListOf<String>()
+                for (k in 0 until detailsRuns.length()) {
+                    val runObj = detailsRuns.getJSONObject(k)
+                    val t = runObj.optString("text", "")
+                    if (t != " • " && t.isNotBlank() && !t.contains("просмотр", ignoreCase = true) && !t.contains("view", ignoreCase = true)) {
+                        runTexts.add(t)
+                    }
+                    val bId = runObj.optJSONObject("navigationEndpoint")
+                        ?.optJSONObject("browseEndpoint")
+                        ?.optString("browseId")
+                    if (artistId == null && !bId.isNullOrBlank() && bId.startsWith("UC")) {
+                        artistId = bId
+                    }
+                }
+
+                if (runTexts.isNotEmpty()) artist = runTexts[0]
+                if (runTexts.size >= 2) {
+                    if (runTexts.last().contains(":")) {
+                        duration = runTexts.last()
+                    }
+                }
+
+                // 3. VideoId (из overlay или navigationEndpoint)
+                var videoId = mir.optJSONObject("overlay")
+                    ?.optJSONObject("musicItemThumbnailOverlayRenderer")
+                    ?.optJSONObject("content")
+                    ?.optJSONObject("musicPlayButtonRenderer")
+                    ?.optJSONObject("playNavigationEndpoint")
+                    ?.optJSONObject("watchEndpoint")
+                    ?.optString("videoId")
+
+                if (videoId.isNullOrBlank()) {
+                    videoId = mir.optJSONObject("navigationEndpoint")
+                        ?.optJSONObject("watchEndpoint")
+                        ?.optString("videoId")
+                }
+                if (videoId.isNullOrBlank()) {
+                    videoId = cols.getJSONObject(0)
+                        .getJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                        .getJSONObject("text")
+                        .getJSONArray("runs")
+                        .getJSONObject(0)
+                        .optJSONObject("navigationEndpoint")
+                        ?.optJSONObject("watchEndpoint")
+                        ?.optString("videoId")
+                }
+
+                // 4. Thumbnail
+                val thumbs = mir.optJSONObject("thumbnail")
+                    ?.optJSONObject("musicThumbnailRenderer")
+                    ?.optJSONObject("thumbnail")
+                    ?.optJSONArray("thumbnails")
+                val rawThumb = if (thumbs != null && thumbs.length() > 0) {
+                    thumbs.getJSONObject(thumbs.length() - 1).optString("url")
+                } else "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+
+                if (!videoId.isNullOrBlank()) {
+                    videos.add(
+                        Track(
+                            id = videoId,
+                            title = title,
+                            artist = artist,
+                            artistId = artistId,
+                            album = "Видео / Без цензуры",
+                            duration = duration,
+                            thumbnailUrl = cleanThumbnail(rawThumb, 1080)
+                        )
+                    )
+                    if (videos.size >= limit) return@withContext videos
+                }
+            }
+        }
+        videos
+    }
+
     suspend fun searchAlbums(query: String, limit: Int = 15): List<Album> = withContext(Dispatchers.IO) {
         val payload = JSONObject().apply {
             put("query", query)
@@ -716,13 +845,16 @@ class InnerTubeRepository {
             }
         }
 
+        // Сортировка альбомов и синглов по дате: самые свежие сверху
+        val sortedAlbums = albums.sortedByDescending { it.year.toIntOrNull() ?: 0 }
+
         Artist(
             channelId = channelId,
             name = artistName,
             subscribers = subscribers,
             avatarUrl = avatarUrl,
             topTracks = topTracks,
-            albums = albums,
+            albums = sortedAlbums,
             similarArtists = similarArtists,
             allSongsBrowseId = allSongsBrowseId,
             allSongsParams = allSongsParams

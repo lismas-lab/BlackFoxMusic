@@ -120,12 +120,13 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Чипы фильтрации (Все, Песни, Альбомы)
-            Row(
+            // Чипы фильтрации (Все, Песни, Видео, Артисты, Альбомы)
+            LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                SearchFilter.entries.forEach { filter ->
+                items(SearchFilter.entries) { filter ->
                     val isSelected = selectedFilter == filter
                     Box(
                         modifier = Modifier
@@ -758,6 +759,68 @@ fun HomeScreen(
                                         fontSize = 18.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                                    )
+                                }
+
+                                items(uiState.tracks, key = { it.id }) { track ->
+                                    val isFav = favorites.contains(track.id)
+                                    val progress = downloadProgressMap[track.id]
+                                    val isDownloaded = downloadedTrackIds.contains(track.id) || track.isDownloaded
+
+                                    TrackListItem(
+                                        track = track,
+                                        onTrackClick = { onTrackPlay(track, uiState.tracks) },
+                                        isFavorite = isFav,
+                                        onFavoriteToggle = { viewModel.toggleFavorite(track) },
+                                        onAddToPlaylistClick = { selectedTrackForPlaylist = track },
+                                        onDownloadClick = { viewModel.downloadTrack(track) },
+                                        downloadProgress = progress,
+                                        isDownloaded = isDownloaded,
+                                        isActive = currentTrack?.id == track.id,
+                                        isPlaying = isPlaying && currentTrack?.id == track.id,
+                                        onArtistClick = { artistName, artistId ->
+                                            onArtistNameClick(artistName, artistId)
+                                        }
+                                    )
+                                }
+                            }
+
+                            // 4. Видеоклипы и версии без цензуры
+                            if (uiState.videos.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Видеоклипы и версии без цензуры",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                                    )
+
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        contentPadding = PaddingValues(vertical = 4.dp)
+                                    ) {
+                                        items(uiState.videos, key = { it.id }) { video ->
+                                            VideoGridItem(
+                                                video = video,
+                                                onVideoClick = { onTrackPlay(video, uiState.videos) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        SearchFilter.VIDEOS -> {
+                            // Вертикальный список видеоверсий при фильтре "Видео"
+                            if (uiState.tracks.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Видео и версии без цензуры",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(vertical = 6.dp)
                                     )
                                 }
 
