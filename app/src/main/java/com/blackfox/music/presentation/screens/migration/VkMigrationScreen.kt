@@ -1,5 +1,6 @@
 package com.blackfox.music.presentation.screens.migration
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -56,6 +57,14 @@ fun VkMigrationScreen(
     var isOpenConfirmed by remember { mutableStateOf(false) }
     var isDownloadRequested by remember { mutableStateOf(false) }
     var isClearTracksRequested by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = true) {
+        if (uiState !is MigrationUiState.Idle && uiState !is MigrationUiState.Completed && uiState !is MigrationUiState.Error) {
+            viewModel.reset()
+        } else {
+            onBackClick()
+        }
+    }
 
     Box(
         modifier = modifier
@@ -245,6 +254,7 @@ private fun IdleMigrationContent(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
+            .navigationBarsPadding()
             .padding(bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -511,6 +521,7 @@ private fun ConfirmMigrationContent(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
+            .navigationBarsPadding()
             .padding(bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -738,7 +749,9 @@ private fun MatchingTracksContent(
     val percentage = (progress * 100).toInt()
 
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -1059,6 +1072,7 @@ private fun ReviewMatchingContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1570,7 +1584,9 @@ private fun DownloadingTracksContent(
     val percentage = (progress * 100).toInt()
 
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -1692,6 +1708,7 @@ private fun CompletedMigrationContent(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
+            .navigationBarsPadding()
             .padding(bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

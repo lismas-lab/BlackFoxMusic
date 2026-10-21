@@ -299,27 +299,37 @@ class VkMigrationViewModel(
                 val vkIdToMatched = matchedItems.associate { it.vkTrack.id to it.matchedTrack!! }
 
                 // 3. Сохранение треков в "Любимое"
+                // В VK треки упорядочены от самых новых к старым (индекс 0 - самый свежий трек).
+                // Чтобы новые треки отображались сверху (ORDER BY favoriteOrderPosition ASC),
+                // самый свежий трек (индекс 0) должен получить наименьший targetPos.
+                val favItems = matchedItems.filter { it.isFavorite }
+                val totalFav = favItems.size
                 val minFavPos = musicDao.getMinFavoriteOrder() ?: 0
-                var favOffset = 1
-                for (item in matchedItems) {
-                    if (item.isFavorite) {
-                        val matched = item.matchedTrack ?: continue
-                        val targetPos = minFavPos - favOffset++
-                        musicDao.insertTrack(
-                            TrackEntity(
-                                id = matched.id,
-                                title = matched.title,
-                                artist = matched.artist,
-                                album = matched.album,
-                                albumId = matched.albumId,
-                                duration = matched.duration,
-                                durationSeconds = matched.durationSeconds,
-                                thumbnailUrl = matched.thumbnailUrl,
-                                isFavorite = true,
-                                favoriteOrderPosition = targetPos
-                            )
+
+                favItems.forEachIndexed { index, item ->
+                    val matched = item.matchedTrack ?: return@forEachIndexed
+                    val targetPos = minFavPos - (totalFav - index)
+                    val existing = musicDao.getTrackById(matched.id)
+                    val entity = if (existing != null) {
+                        existing.copy(
+                            isFavorite = true,
+                            favoriteOrderPosition = targetPos
+                        )
+                    } else {
+                        TrackEntity(
+                            id = matched.id,
+                            title = matched.title,
+                            artist = matched.artist,
+                            album = matched.album,
+                            albumId = matched.albumId,
+                            duration = matched.duration,
+                            durationSeconds = matched.durationSeconds,
+                            thumbnailUrl = matched.thumbnailUrl,
+                            isFavorite = true,
+                            favoriteOrderPosition = targetPos
                         )
                     }
+                    musicDao.insertTrack(entity)
                 }
 
                 // 4. Создание пользовательских плейлистов и привязка треков

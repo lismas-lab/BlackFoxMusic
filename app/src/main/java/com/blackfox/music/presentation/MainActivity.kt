@@ -808,82 +808,84 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Плавающий мини-плеер и нижняя навигация
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                    ) {
-                        // Мини-плеер (если выбран трек)
-                        currentTrack?.let { track ->
-                            val progress = if (totalDurationMs > 0) currentPositionMs.toFloat() / totalDurationMs else 0f
-                            val isFav = favoriteSet.contains(track.id)
-
-                            FloatingMiniPlayer(
-                                currentTrack = track,
-                                isPlaying = isPlaying,
-                                progressFraction = progress,
-                                onPlayPauseClick = { playerManager.togglePlayPause() },
-                                onPlayerClick = { isFullPlayerVisible = true },
-                                isFavorite = isFav,
-                                onFavoriteToggle = { toggleFavorite(track) }
-                            )
-                        }
-
-                        // Стеклянная нижняя навигация (островная)
-                        Row(
+                    // Плавающий мини-плеер и нижняя навигация (скрываем в режиме миграции)
+                    if (!isVkMigrationOpen) {
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .height(62.dp)
-                                .floatingGlass(cornerRadius = 28.dp)
-                                .padding(horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceAround,
-                            verticalAlignment = Alignment.CenterVertically
+                                .align(Alignment.BottomCenter)
+                                .navigationBarsPadding()
                         ) {
-                            MainTab.entries.forEach { tab ->
-                                val isSelected = currentTab == tab &&
-                                        selectedAlbumBrowseId == null &&
-                                        selectedArtistId == null &&
-                                        selectedArtistName == null &&
-                                        selectedPlaylistId == null &&
-                                        !isFavoritesOpen &&
-                                        !isDownloadedOpen &&
-                                        !isUploadedOpen &&
-                                        !isFollowedArtistsOpen
+                            // Мини-плеер (если выбран трек)
+                            currentTrack?.let { track ->
+                                val progress = if (totalDurationMs > 0) currentPositionMs.toFloat() / totalDurationMs else 0f
+                                val isFav = favoriteSet.contains(track.id)
 
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable {
-                                            if (tab == MainTab.HOME && isSelected) {
-                                                searchViewModel.onQueryChange("")
+                                FloatingMiniPlayer(
+                                    currentTrack = track,
+                                    isPlaying = isPlaying,
+                                    progressFraction = progress,
+                                    onPlayPauseClick = { playerManager.togglePlayPause() },
+                                    onPlayerClick = { isFullPlayerVisible = true },
+                                    isFavorite = isFav,
+                                    onFavoriteToggle = { toggleFavorite(track) }
+                                )
+                            }
+
+                            // Стеклянная нижняя навигация (островная)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    .height(62.dp)
+                                    .floatingGlass(cornerRadius = 28.dp)
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceAround,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                MainTab.entries.forEach { tab ->
+                                    val isSelected = currentTab == tab &&
+                                            selectedAlbumBrowseId == null &&
+                                            selectedArtistId == null &&
+                                            selectedArtistName == null &&
+                                            selectedPlaylistId == null &&
+                                            !isFavoritesOpen &&
+                                            !isDownloadedOpen &&
+                                            !isUploadedOpen &&
+                                            !isFollowedArtistsOpen
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                if (tab == MainTab.HOME && isSelected) {
+                                                    searchViewModel.onQueryChange("")
+                                                }
+                                                selectedAlbumBrowseId = null
+                                                selectedArtistId = null
+                                                selectedArtistName = null
+                                                selectedPlaylistId = null
+                                                isFavoritesOpen = false
+                                                isDownloadedOpen = false
+                                                isUploadedOpen = false
+                                                isFollowedArtistsOpen = false
+                                                currentTab = tab
                                             }
-                                            selectedAlbumBrowseId = null
-                                            selectedArtistId = null
-                                            selectedArtistName = null
-                                            selectedPlaylistId = null
-                                            isFavoritesOpen = false
-                                            isDownloadedOpen = false
-                                            isUploadedOpen = false
-                                            isFollowedArtistsOpen = false
-                                            currentTab = tab
-                                        }
-                                        .padding(horizontal = 14.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = tab.icon,
-                                        contentDescription = tab.title,
-                                        tint = if (isSelected) currentAccentTheme.color else TextMuted,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Text(
-                                        text = tab.title,
-                                        color = if (isSelected) currentAccentTheme.color else TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
-                                    )
+                                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = tab.icon,
+                                            contentDescription = tab.title,
+                                            tint = if (isSelected) currentAccentTheme.color else TextMuted,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Text(
+                                            text = tab.title,
+                                            color = if (isSelected) currentAccentTheme.color else TextMuted,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
+                                        )
+                                    }
                                 }
                             }
                         }
