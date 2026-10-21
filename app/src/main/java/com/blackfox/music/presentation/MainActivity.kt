@@ -56,7 +56,10 @@ import com.blackfox.music.presentation.screens.settings.SettingsScreen
 import com.blackfox.music.presentation.theme.*
 import com.blackfox.music.service.AudioPlayerManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class MainTab(val title: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
@@ -77,10 +80,12 @@ class MainActivity : ComponentActivity() {
         val repository = InnerTubeRepository()
         val downloadManager = app.downloadManager
         val playlistRepository = app.playlistRepository
+        val appSettings = app.appSettings
         playerManager = app.playerManager
 
         setContent {
-            BlackFoxTheme {
+            val currentAccentTheme by appSettings.currentAccent.collectAsState()
+            BlackFoxTheme(accentTheme = currentAccentTheme) {
                 val coroutineScope = rememberCoroutineScope()
 
                 // Запрос разрешения на показ уведомлений (Android 13+) для фонового плеера и шторки
@@ -210,16 +215,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Перемещение трека в избранном
-                fun moveFavoriteTrack(fromIdx: Int, toIdx: Int) {
-                    if (fromIdx in favoriteTracks.indices && toIdx in favoriteTracks.indices) {
-                        coroutineScope.launch {
-                            val list = favoriteTracks.toMutableList()
-                            val moved = list.removeAt(fromIdx)
-                            list.add(toIdx, moved)
-                            list.forEachIndexed { index, track ->
-                                musicDao.updateFavoriteOrder(track.id, index)
-                            }
+                // Сохранение порядка избранного после перетаскивания
+                fun reorderFavorites(orderedIds: List<String>) {
+                    coroutineScope.launch {
+                        orderedIds.forEachIndexed { index, trackId ->
+                            musicDao.updateFavoriteOrder(trackId, index)
                         }
                     }
                 }
@@ -227,23 +227,83 @@ class MainActivity : ComponentActivity() {
                 // Запуск бесконечного радиопотока Fox Flow (Моя волна)
                 fun startFoxFlow() {
                     coroutineScope.launch {
-                        val seed = favoriteTracks.randomOrNull() ?: allSavedTracks.randomOrNull()
-                        val seedId = seed?.id ?: "dQw4w9WgXcQ"
-                        val radioQueue = repository.getRadioQueue(seedId)
-                        if (radioQueue.isNotEmpty()) {
-                            playerManager.setQueueAndPlay(radioQueue, 0)
-                        } else if (seed != null) {
-                            val fallback = Track(
-                                id = seed.id,
-                                title = seed.title,
-                                artist = seed.artist,
-                                album = seed.album,
-                                duration = seed.duration,
-                                thumbnailUrl = seed.thumbnailUrl,
-                                isDownloaded = seed.isDownloaded,
-                                localFilePath = seed.localFilePath
+                        val favIds = favoriteSet
+                        val userLibraryDomain = (favoriteTracks.map { entity ->
+                            Track(
+                                id = entity.id,
+                                title = entity.title,
+                                artist = entity.artist,
+                                album = entity.album,
+                                duration = entity.duration,
+                                thumbnailUrl = entity.thumbnailUrl,
+                                isDownloaded = entity.isDownloaded,
+                                localFilePath = entity.localFilePath
                             )
-                            playerManager.setQueueAndPlay(listOf(fallback), 0)
+                        } + allSavedTracks.map { entity ->
+                            Track(
+                                id = entity.id,
+                                title = entity.title,
+                                artist = entity.artist,
+                                album = entity.album,
+                                duration = entity.duration,
+                                thumbnailUrl = entity.thumbnailUrl,
+                                isDownloaded = entity.isDownloaded,
+                                localFilePath = entity.localFilePath
+                            )
+                        }).distinctBy { it.id }
+
+                        val flowQueue = withContext(Dispatchers.IO) {
+                            val queueResult = mutableListOf<Track>()
+
+                            if (userLibraryDomain.isNotEmpty()) {
+                                // До 4 разнообразных семян от разных исполнителей
+                                val seeds = userLibraryDomain.shuffled()
+                                    .distinctBy { it.artist.lowercase().trim() }
+                                    .take(4)
+
+                                val deferreds = seeds.map { seed ->
+                                    async {
+                                        try {
+                                            repository.getRadioQueue(seed.id)
+                                        } catch (e: Exception) {
+                                            emptyList()
+                                        }
+                                    }
+                                }
+                                val queues = deferreds.awaitAll()
+                                val seedIds = seeds.map { it.id }.toSet()
+
+                                var maxLen = 0
+                                queues.forEach { if (it.size > maxLen) maxLen = it.size }
+
+                                for (idx in 0 until maxLen) {
+                                    for (q in queues) {
+                                        if (idx < q.size) {
+                                            val candidate = q[idx]
+                                            if (!seedIds.contains(candidate.id) && !queueResult.any { it.id == candidate.id }) {
+                                                queueResult.add(candidate)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (queueResult.isEmpty()) {
+                                val fallbackList = repository.searchTracks("popular music mix", limit = 30)
+                                queueResult.addAll(fallbackList)
+                            }
+
+                            // Не запускать песню из любимых первой!
+                            val firstNonFavIndex = queueResult.indexOfFirst { !favIds.contains(it.id) }
+                            if (firstNonFavIndex > 0) {
+                                val nonFav = queueResult.removeAt(firstNonFavIndex)
+                                queueResult.add(0, nonFav)
+                            }
+                            queueResult
+                        }
+
+                        if (flowQueue.isNotEmpty()) {
+                            playerManager.setQueueAndPlay(flowQueue, 0)
                         }
                     }
                 }
@@ -387,6 +447,8 @@ class MainActivity : ComponentActivity() {
                                     selectedArtistId = artist.channelId
                                     selectedArtistName = artist.name
                                 },
+                                currentTrack = currentTrack,
+                                isPlaying = isPlaying,
                                 downloadProgressMap = downloadProgressMap
                             )
                         }
@@ -476,11 +538,13 @@ class MainActivity : ComponentActivity() {
                                             selectedPlaylistId = null
                                         }
                                     },
-                                    onMoveTrack = { fromIdx, toIdx ->
+                                    onReorderTracks = { orderedIds ->
                                         coroutineScope.launch {
-                                            playlistRepository.moveTrack(currentPlaylist.playlistId, fromIdx, toIdx)
+                                            playlistRepository.updatePlaylistOrder(currentPlaylist.playlistId, orderedIds)
                                         }
-                                    }
+                                    },
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying
                                 )
                             } else {
                                 selectedPlaylistId = null
@@ -512,7 +576,9 @@ class MainActivity : ComponentActivity() {
                                 onShuffle = { playFavorites(shuffle = true) },
                                 onToggleFavorite = { track -> toggleFavorite(track) },
                                 onAddToPlaylistClick = { track -> trackForPlaylistSheet = track },
-                                onMoveTrack = { fromIdx, toIdx -> moveFavoriteTrack(fromIdx, toIdx) }
+                                onReorderFavorites = { orderedIds -> reorderFavorites(orderedIds) },
+                                currentTrack = currentTrack,
+                                isPlaying = isPlaying
                             )
                         }
 
@@ -529,7 +595,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onPlayAll = { playUploaded(shuffle = false) },
                                 onShuffle = { playUploaded(shuffle = true) },
-                                onToggleFavorite = { track -> toggleFavorite(track) }
+                                onToggleFavorite = { track -> toggleFavorite(track) },
+                                currentTrack = currentTrack,
+                                isPlaying = isPlaying
                             )
                         }
 
@@ -542,6 +610,8 @@ class MainActivity : ComponentActivity() {
                                         favoriteTracks = favoriteTracks,
                                         userPlaylistsCount = userPlaylists.size,
                                         allSavedTracks = allSavedTracks,
+                                        currentTrack = currentTrack,
+                                        isPlaying = isPlaying,
                                         onTrackPlay = { track, queue ->
                                             playTrackInQueue(track, queue)
                                         },
@@ -602,6 +672,11 @@ class MainActivity : ComponentActivity() {
                                     SettingsScreen(
                                         downloadedTracksCount = downloadedCount,
                                         storageSizeBytes = storageSizeBytes,
+                                        appSettings = appSettings,
+                                        favoriteTracks = favoriteTracks,
+                                        userPlaylists = userPlaylists,
+                                        musicDao = musicDao,
+                                        playlistRepository = playlistRepository,
                                         onClearAllDownloads = {
                                             coroutineScope.launch {
                                                 downloadManager.clearAllDownloaded()
@@ -660,6 +735,9 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
+                                            if (tab == MainTab.HOME && isSelected) {
+                                                searchViewModel.onQueryChange("")
+                                            }
                                             selectedAlbumBrowseId = null
                                             selectedArtistId = null
                                             selectedArtistName = null
@@ -673,12 +751,12 @@ class MainActivity : ComponentActivity() {
                                     Icon(
                                         imageVector = tab.icon,
                                         contentDescription = tab.title,
-                                        tint = if (isSelected) FoxOrange else TextMuted,
+                                        tint = if (isSelected) currentAccentTheme.color else TextMuted,
                                         modifier = Modifier.size(24.dp)
                                     )
                                     Text(
                                         text = tab.title,
-                                        color = if (isSelected) FoxOrange else TextMuted,
+                                        color = if (isSelected) currentAccentTheme.color else TextMuted,
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
                                     )

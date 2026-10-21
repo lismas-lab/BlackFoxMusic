@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -50,6 +51,8 @@ fun ArtistScreen(
     onPlayTrack: (Track, List<Track>) -> Unit,
     onAlbumClick: (Album) -> Unit,
     onArtistClick: (Artist) -> Unit = {},
+    currentTrack: Track? = null,
+    isPlaying: Boolean = false,
     downloadProgressMap: Map<String, DownloadProgress> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
@@ -59,6 +62,9 @@ fun ArtistScreen(
     val playlists by viewModel.playlists.collectAsState()
     val allTracks by viewModel.allTracks.collectAsState()
     val isAllTracksLoading by viewModel.isAllTracksLoading.collectAsState()
+    val allTracksContinuationToken by viewModel.allTracksContinuationToken.collectAsState()
+    val isLoadingMoreTracks by viewModel.isLoadingMoreTracks.collectAsState()
+    val totalSongsCount by viewModel.totalSongsCountString.collectAsState()
 
     var selectedTab by remember { mutableStateOf(ArtistTab.OVERVIEW) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
@@ -134,8 +140,15 @@ fun ArtistScreen(
                 ) {
                     ArtistTab.entries.forEach { tab ->
                         val isSelected = selectedTab == tab
+                        val hasMore = !allTracksContinuationToken.isNullOrBlank()
                         val countSuffix = when (tab) {
-                            ArtistTab.ALL_SONGS -> if (allTracks.isNotEmpty()) " (${allTracks.size})" else ""
+                            ArtistTab.ALL_SONGS -> {
+                                if (!totalSongsCount.isNullOrBlank()) {
+                                    " ($totalSongsCount)"
+                                } else if (allTracks.isNotEmpty()) {
+                                    if (hasMore) " (${allTracks.size}+)" else " (${allTracks.size})"
+                                } else ""
+                            }
                             ArtistTab.SIMILAR -> if (artist.similarArtists.isNotEmpty()) " (${artist.similarArtists.size})" else ""
                             else -> ""
                         }
@@ -309,7 +322,9 @@ fun ArtistScreen(
                                         onAddToPlaylistClick = { selectedTrackForPlaylist = track },
                                         onDownloadClick = { viewModel.downloadTrack(track) },
                                         downloadProgress = progress,
-                                        isDownloaded = isDownloaded
+                                        isDownloaded = isDownloaded,
+                                        isActive = currentTrack?.id == track.id,
+                                        isPlaying = isPlaying && currentTrack?.id == track.id
                                     )
                                 }
                             }
@@ -438,8 +453,51 @@ fun ArtistScreen(
                                         onAddToPlaylistClick = { selectedTrackForPlaylist = track },
                                         onDownloadClick = { viewModel.downloadTrack(track) },
                                         downloadProgress = progress,
-                                        isDownloaded = isDownloaded
+                                        isDownloaded = isDownloaded,
+                                        isActive = currentTrack?.id == track.id,
+                                        isPlaying = isPlaying && currentTrack?.id == track.id
                                     )
+                                }
+
+                                if (!allTracksContinuationToken.isNullOrBlank()) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isLoadingMoreTracks) {
+                                                CircularProgressIndicator(
+                                                    color = FoxOrange,
+                                                    modifier = Modifier.size(28.dp),
+                                                    strokeWidth = 2.5.dp
+                                                )
+                                            } else {
+                                                Button(
+                                                    onClick = { viewModel.loadMoreTracks() },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0x22FFFFFF),
+                                                        contentColor = TextPrimary
+                                                    ),
+                                                    shape = RoundedCornerShape(20.dp),
+                                                    modifier = Modifier.liquidGlass(cornerRadius = 20.dp, backgroundColor = Color(0x18FFFFFF))
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Показать больше",
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 14.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

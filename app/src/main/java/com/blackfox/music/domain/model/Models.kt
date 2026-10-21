@@ -46,3 +46,9 @@ data class Playlist(
     val trackCount: Int = 0,
     val tracks: List<Track> = emptyList()
 )
+
+data class ArtistTracksPage(
+    val tracks: List<Track> = emptyList(),
+    val continuationToken: String? = null,
+    val totalCountString: String? = null
+)

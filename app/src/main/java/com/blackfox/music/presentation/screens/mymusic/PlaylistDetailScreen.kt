@@ -1,11 +1,11 @@
 package com.blackfox.music.presentation.screens.mymusic
 
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -20,11 +20,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.local.PlaylistEntity
@@ -49,15 +52,15 @@ fun PlaylistDetailScreen(
     onUpdateCover: (Uri?) -> Unit,
     onRenamePlaylist: (String) -> Unit,
     onDeletePlaylist: () -> Unit,
-    onMoveTrack: (fromIndex: Int, toIndex: Int) -> Unit,
+    onReorderTracks: (List<String>) -> Unit,
+    currentTrack: Track? = null,
+    isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val pl = playlist
-    var isReorderMode by remember { mutableStateOf(false) }
-
-    BackHandler(enabled = isReorderMode) {
-        isReorderMode = false
-    }
+    var localTracks by remember(tracks) { mutableStateOf(tracks) }
+    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
 
     val coverModel = remember(pl.customCoverUri, tracks) {
         when {
@@ -145,19 +148,6 @@ fun PlaylistDetailScreen(
                                         onClick = {
                                             isMenuExpanded = false
                                             onUpdateCover(null)
-                                        }
-                                    )
-                                }
-
-                                if (tracks.size > 1) {
-                                    DropdownMenuItem(
-                                        text = { Text("Порядок треков", color = TextPrimary, fontSize = 13.sp) },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.SwapVert, contentDescription = null, tint = FoxOrange, modifier = Modifier.size(18.dp))
-                                        },
-                                        onClick = {
-                                            isMenuExpanded = false
-                                            isReorderMode = true
                                         }
                                     )
                                 }
@@ -299,47 +289,6 @@ fun PlaylistDetailScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Микс", color = TextPrimary, fontWeight = FontWeight.Medium)
                             }
-
-                            if (tracks.size > 1) {
-                                IconButton(
-                                    onClick = { isReorderMode = !isReorderMode },
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(if (isReorderMode) FoxOrange.copy(alpha = 0.25f) else Color(0x1AFFFFFF))
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.SwapVert,
-                                        contentDescription = "Изменить порядок",
-                                        tint = if (isReorderMode) FoxOrange else TextPrimary,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        if (isReorderMode) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.92f)
-                                    .liquidGlass(cornerRadius = 14.dp, backgroundColor = FoxOrange.copy(alpha = 0.12f))
-                                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.SwapVert, contentDescription = null, tint = FoxOrange, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Перемещение треков", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                }
-                                TextButton(
-                                    onClick = { isReorderMode = false },
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                ) {
-                                    Text("Готово", color = FoxOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                            }
                         }
                     }
 
@@ -374,7 +323,7 @@ fun PlaylistDetailScreen(
                     }
                 }
             } else {
-                itemsIndexed(tracks, key = { _, t -> t.id }) { index, entity ->
+                itemsIndexed(localTracks, key = { _, t -> t.id }) { index, entity ->
                     val domainTrack = Track(
                         id = entity.id,
                         title = entity.title,
@@ -387,6 +336,7 @@ fun PlaylistDetailScreen(
                     )
                     val isFav = favoriteTrackIds.contains(entity.id)
                     val progress = downloadProgressMap[entity.id]
+                    val isDragging = draggingIndex == index
 
                     TrackListItem(
                         track = domainTrack,
@@ -397,9 +347,50 @@ fun PlaylistDetailScreen(
                         onDownloadClick = { /* скачивание */ },
                         downloadProgress = progress,
                         isDownloaded = entity.isDownloaded,
-                        showReorderHandle = isReorderMode,
-                        onMoveUp = if (index > 0) { { onMoveTrack(index, index - 1) } } else null,
-                        onMoveDown = if (index < tracks.lastIndex) { { onMoveTrack(index, index + 1) } } else null
+                        isActive = currentTrack?.id == entity.id,
+                        isPlaying = isPlaying && currentTrack?.id == entity.id,
+                        showReorderHandle = true,
+                        reorderHandleModifier = Modifier.pointerInput(entity.id) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    draggingIndex = index
+                                    dragOffsetY = 0f
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetY += dragAmount.y
+                                    val itemHeightPx = 68.dp.toPx()
+                                    val fromIdx = draggingIndex ?: return@detectDragGestures
+                                    val steps = (dragOffsetY / itemHeightPx).toInt()
+                                    val targetIdx = (fromIdx + steps).coerceIn(0, localTracks.lastIndex)
+                                    if (targetIdx != fromIdx) {
+                                        val updated = localTracks.toMutableList().apply {
+                                            add(targetIdx, removeAt(fromIdx))
+                                        }
+                                        localTracks = updated
+                                        draggingIndex = targetIdx
+                                        dragOffsetY -= (targetIdx - fromIdx) * itemHeightPx
+                                    }
+                                },
+                                onDragEnd = {
+                                    draggingIndex = null
+                                    dragOffsetY = 0f
+                                    onReorderTracks(localTracks.map { it.id })
+                                },
+                                onDragCancel = {
+                                    draggingIndex = null
+                                    dragOffsetY = 0f
+                                }
+                            )
+                        },
+                        modifier = Modifier
+                            .zIndex(if (isDragging) 10f else 1f)
+                            .graphicsLayer {
+                                translationY = if (isDragging) dragOffsetY else 0f
+                                scaleX = if (isDragging) 1.02f else 1f
+                                scaleY = if (isDragging) 1.02f else 1f
+                                shadowElevation = if (isDragging) 16f else 0f
+                            }
                     )
                 }
             }

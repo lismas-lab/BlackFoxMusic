@@ -9,6 +9,7 @@ import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.data.repository.PlaylistRepository
 import com.blackfox.music.domain.model.Artist
+import com.blackfox.music.domain.model.ArtistTracksPage
 import com.blackfox.music.domain.model.Track
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -31,6 +32,9 @@ class ArtistViewModel(
     val uiState = MutableStateFlow(ArtistUiState(isLoading = true))
     val allTracks = MutableStateFlow<List<Track>>(emptyList())
     val isAllTracksLoading = MutableStateFlow(false)
+    val allTracksContinuationToken = MutableStateFlow<String?>(null)
+    val totalSongsCountString = MutableStateFlow<String?>(null)
+    val isLoadingMoreTracks = MutableStateFlow(false)
 
     val playlists: StateFlow<List<PlaylistEntity>> = musicDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -85,18 +89,47 @@ class ArtistViewModel(
         viewModelScope.launch {
             isAllTracksLoading.value = true
             try {
-                val list = repository.getArtistAllTracks(
+                val page = repository.getArtistAllTracks(
                     allSongsBrowseId = a.allSongsBrowseId ?: "",
                     artistName = a.name,
                     artistId = a.channelId
                 )
-                allTracks.value = if (list.isNotEmpty()) list else a.topTracks
+                allTracks.value = if (page.tracks.isNotEmpty()) page.tracks else a.topTracks
+                allTracksContinuationToken.value = page.continuationToken
+                totalSongsCountString.value = page.totalCountString
             } catch (e: Exception) {
                 if (allTracks.value.isEmpty()) {
                     allTracks.value = a.topTracks
                 }
             } finally {
                 isAllTracksLoading.value = false
+            }
+        }
+    }
+
+    fun loadMoreTracks() {
+        val token = allTracksContinuationToken.value ?: return
+        val a = uiState.value.artist ?: return
+        if (isLoadingMoreTracks.value) return
+
+        viewModelScope.launch {
+            isLoadingMoreTracks.value = true
+            try {
+                val page = repository.getArtistTracksContinuation(
+                    continuationToken = token,
+                    artistName = a.name,
+                    artistId = a.channelId
+                )
+                if (page.tracks.isNotEmpty()) {
+                    val existingIds = allTracks.value.map { it.id }.toSet()
+                    val newTracks = page.tracks.filter { !existingIds.contains(it.id) }
+                    allTracks.value = allTracks.value + newTracks
+                }
+                allTracksContinuationToken.value = page.continuationToken
+            } catch (e: Exception) {
+                // ignore
+            } finally {
+                isLoadingMoreTracks.value = false
             }
         }
     }

@@ -43,6 +43,8 @@ fun HomeScreen(
     favoriteTracks: List<TrackEntity>,
     userPlaylistsCount: Int,
     allSavedTracks: List<TrackEntity> = emptyList(),
+    currentTrack: Track? = null,
+    isPlaying: Boolean = false,
     onTrackPlay: (track: Track, queue: List<Track>) -> Unit,
     onPlayFavorites: () -> Unit,
     onAlbumClick: (Album) -> Unit,
@@ -549,6 +551,8 @@ fun HomeScreen(
                                 onDownloadClick = { viewModel.downloadTrack(track) },
                                 downloadProgress = progress,
                                 isDownloaded = isDownloaded,
+                                isActive = currentTrack?.id == track.id,
+                                isPlaying = isPlaying && currentTrack?.id == track.id,
                                 onArtistClick = { artistName, artistId ->
                                     onArtistNameClick(artistName, artistId)
                                 }
@@ -637,6 +641,8 @@ fun HomeScreen(
                                         onDownloadClick = { viewModel.downloadTrack(track) },
                                         downloadProgress = progress,
                                         isDownloaded = isDownloaded,
+                                        isActive = currentTrack?.id == track.id,
+                                        isPlaying = isPlaying && currentTrack?.id == track.id,
                                         onArtistClick = { artistName, artistId ->
                                             onArtistNameClick(artistName, artistId)
                                         }
@@ -716,6 +722,8 @@ fun HomeScreen(
                                         onDownloadClick = { viewModel.downloadTrack(track) },
                                         downloadProgress = progress,
                                         isDownloaded = isDownloaded,
+                                        isActive = currentTrack?.id == track.id,
+                                        isPlaying = isPlaying && currentTrack?.id == track.id,
                                         onArtistClick = { artistName, artistId ->
                                             onArtistNameClick(artistName, artistId)
                                         }

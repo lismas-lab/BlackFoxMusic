@@ -51,6 +51,8 @@ fun UploadedTracksScreen(
     onPlayAll: () -> Unit,
     onShuffle: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
+    currentTrack: Track? = null,
+    isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -293,7 +295,9 @@ fun UploadedTracksScreen(
                                 onFavoriteToggle = { onToggleFavorite(track) },
                                 onAddToPlaylistClick = { trackForPlaylist = track },
                                 onDownloadClick = { /* уже локальный */ },
-                                isDownloaded = true
+                                isDownloaded = true,
+                                isActive = currentTrack?.id == track.id,
+                                isPlaying = isPlaying && currentTrack?.id == track.id
                             )
                         }
 

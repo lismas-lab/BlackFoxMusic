@@ -102,6 +102,10 @@ class PlaylistRepository(
         newId
     }
 
+    suspend fun updatePlaylistOrder(playlistId: Long, trackIds: List<String>) = withContext(Dispatchers.IO) {
+        musicDao.updatePlaylistTracksOrder(playlistId, trackIds)
+    }
+
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String) = withContext(Dispatchers.IO) {
         musicDao.removeTrack(playlistId, trackId)
 
