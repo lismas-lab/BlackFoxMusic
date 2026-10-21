@@ -34,19 +34,23 @@ object AudioStreamResolver {
 
     suspend fun resolveAudioStreamUrl(
         videoId: String,
+        forDownload: Boolean = false,
         onProgress: ((Int) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
-        // 1. Первоочередной и гарантированный API прямой конвертации в чистый MP3 320kbps
-        try {
-            val mp3Url = resolveFromLoaderApi(videoId, onProgress)
-            if (!mp3Url.isNullOrBlank()) {
-                return@withContext mp3Url
+        // 1. Для скачивания приоритетен Loader API (чистый файл MP3)
+        if (forDownload) {
+            try {
+                val mp3Url = resolveFromLoaderApi(videoId, onProgress)
+                if (!mp3Url.isNullOrBlank()) {
+                    return@withContext mp3Url
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
 
-        // 2. Fallback: Извлечение через NewPipeExtractor
+        // 2. Для онлайн стриминга первоочередно извлекаем нативный аудиопоток через NewPipeExtractor
+        // Нативный поток m4a/webm поддерживает HTTP Range запросы и мгновенную перемотку (seek)
         try {
             init()
             val watchUrl = "https://www.youtube.com/watch?v=$videoId"
@@ -65,6 +69,23 @@ object AudioStreamResolver {
             val hls = extractor.hlsUrl
             if (!hls.isNullOrBlank()) {
                 return@withContext hls
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // Для стриминга: если NewPipe не дал ссылку, сразу возвращаем null,
+        // чтобы не ждать 20 сек Loader API (который к тому же не поддерживает Range seek),
+        // а мгновенно запустить воспроизведение через проверенный HTML5 IFrame WebView движок!
+        if (!forDownload) {
+            return@withContext null
+        }
+
+        // 3. Fallback для скачивания, если Loader API не сработал на первой попытке
+        try {
+            val mp3Url = resolveFromLoaderApi(videoId, onProgress)
+            if (!mp3Url.isNullOrBlank()) {
+                return@withContext mp3Url
             }
         } catch (e: Exception) {
             e.printStackTrace()

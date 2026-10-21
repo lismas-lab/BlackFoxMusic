@@ -54,6 +54,8 @@ class AudioPlayerManager(
         .setConnectTimeoutMs(15000)
         .setReadTimeoutMs(20000)
         .setAllowCrossProtocolRedirects(true)
+        .setKeepPostFor302Redirects(true)
+        .setDefaultRequestProperties(mapOf("Accept-Encoding" to "identity"))
 
     @OptIn(UnstableApi::class)
     private val mediaSourceFactory = DefaultMediaSourceFactory(context)
@@ -121,10 +123,23 @@ class AudioPlayerManager(
                         }
                         Player.STATE_BUFFERING -> _isLoadingAudio.value = true
                         Player.STATE_ENDED -> {
-                            _isPlaying.value = false
-                            _currentPositionMs.value = 0L
-                            stopExoProgressTicker()
-                            playNext()
+                            val duration = player.duration
+                            val currentPos = player.currentPosition
+                            // Проверяем: если воспроизведение завершилось неожиданно далеко от конца трека (например, срыв Range при перемотке онлайн-потока)
+                            if (duration > 0 && currentPos < duration - 2500L) {
+                                val savedPos = _currentPositionMs.value
+                                activeEngine = PlaybackEngine.WEBVIEW
+                                player.stop()
+                                player.clearMediaItems()
+                                _currentTrack.value?.let { tr ->
+                                    webViewEngine.playTrack(tr.id, startPositionMs = savedPos)
+                                }
+                            } else {
+                                _isPlaying.value = false
+                                _currentPositionMs.value = 0L
+                                stopExoProgressTicker()
+                                playNext()
+                            }
                         }
                     }
                 }
@@ -299,7 +314,7 @@ class AudioPlayerManager(
 
         // 2. Онлайн воспроизведение через прямой поток (ExoPlayer) с фоновым сервисом
         streamResolveJob = scope.launch(Dispatchers.IO) {
-            val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id)
+            val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id, forDownload = false)
             withContext(Dispatchers.Main) {
                 // Убеждаемся, что за время загрузки ссылки пользователь не переключил на другой трек
                 if (_currentTrack.value?.id != track.id) {

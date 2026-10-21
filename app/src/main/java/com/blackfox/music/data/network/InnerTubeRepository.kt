@@ -792,14 +792,31 @@ class InnerTubeRepository {
     /**
      * Получение действительно новых релизов артиста строго за последний месяц (30 дней)
      * через открытый официальный Atom/RSS фид канала артиста YouTube.
+     * Никаких старых релизов, альбомов или сторонних плейлистов: только реальные свежие публикации за 30 дней.
      */
     suspend fun getArtistNewReleasesLastMonth(channelId: String, artistName: String): List<Track> = withContext(Dispatchers.IO) {
         val result = mutableListOf<Track>()
         val thirtyDaysMs = 30L * 24L * 60L * 60L * 1000L
         val nowMs = System.currentTimeMillis()
 
+        var resolvedChannelId = channelId
+        if (!resolvedChannelId.startsWith("UC")) {
+            try {
+                val searchResult = searchArtists(artistName, limit = 3)
+                val matched = searchResult.firstOrNull { it.name.equals(artistName, ignoreCase = true) }
+                    ?: searchResult.firstOrNull()
+                if (matched != null && matched.channelId.startsWith("UC")) {
+                    resolvedChannelId = matched.channelId
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (!resolvedChannelId.startsWith("UC")) {
+            return@withContext emptyList()
+        }
+
         try {
-            val url = URL("https://www.youtube.com/feeds/videos.xml?channel_id=$channelId")
+            val url = URL("https://www.youtube.com/feeds/videos.xml?channel_id=$resolvedChannelId")
             val conn = url.openConnection() as HttpURLConnection
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             conn.connectTimeout = 7000
@@ -841,7 +858,7 @@ class InnerTubeRepository {
                                 id = videoId,
                                 title = cleanTitle,
                                 artist = artistName,
-                                artistId = channelId,
+                                artistId = resolvedChannelId,
                                 album = "Новинка (за 30 дней)",
                                 thumbnailUrl = cleanThumbnail(thumbUrl, 720)
                             )
@@ -850,16 +867,6 @@ class InnerTubeRepository {
                 }
             }
         } catch (_: Exception) {}
-
-        // Если в RSS-фиде не нашлось записей за 30 дней, fallback на самый свежий релиз
-        // текущего года только если он действительно новый (первый в списке)
-        if (result.isEmpty()) {
-            try {
-                val releases = getArtistNewReleases(channelId, artistName)
-                // Ограничиваемся только 1-2 самыми свежими треками первого сингла
-                result.addAll(releases.take(2))
-            } catch (_: Exception) {}
-        }
 
         result.distinctBy { it.id }.take(6)
     }

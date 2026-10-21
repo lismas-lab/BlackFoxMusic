@@ -135,7 +135,7 @@ class AudioDownloadManager(
             var attempts = 0
             while (directStreamUrl.isNullOrBlank() && attempts < 3) {
                 attempts++
-                directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id) { prepPercent ->
+                directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id, forDownload = true) { prepPercent ->
                     updateProgress(track.id, DownloadProgress(track.id, prepPercent, 0, 0, DownloadStatus.DOWNLOADING))
                     DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", prepPercent)
                 }
@@ -191,7 +191,7 @@ class AudioDownloadManager(
                 } catch (e: Exception) {
                     if (downloadAttempts >= 3) throw e
                     delay(1500)
-                    val refreshedUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id)
+                    val refreshedUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id, forDownload = true)
                     if (!refreshedUrl.isNullOrBlank()) {
                         directStreamUrl = refreshedUrl
                     }

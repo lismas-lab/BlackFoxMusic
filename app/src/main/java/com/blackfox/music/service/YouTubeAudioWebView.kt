@@ -42,26 +42,30 @@ class YouTubeAudioWebView(private val context: Context) {
     private var isApiReady = false
     private var isSeeking = false
 
+    private val seekResetRunnable = Runnable {
+        isSeeking = false
+    }
+
     private val progressRunnable = object : Runnable {
         override fun run() {
             if (_isPlaying.value && webView != null) {
                 if (!isSeeking) {
-                    webView?.evaluateJavascript("if (window.player && player.getCurrentTime) player.getCurrentTime();") { res ->
+                    webView?.evaluateJavascript("(function() { var p = window.ytAudioPlayer; return (p && typeof p.getCurrentTime === 'function') ? p.getCurrentTime() : -1; })();") { res ->
                         val clean = res?.replace("\"", "")?.trim()
-                        val sec = clean?.toFloatOrNull() ?: 0f
-                        if (sec > 0f && !isSeeking) {
+                        val sec = clean?.toFloatOrNull() ?: -1f
+                        if (sec >= 0f && !isSeeking) {
                             _currentPositionMs.value = (sec * 1000L).toLong()
                         }
                     }
                 }
-                webView?.evaluateJavascript("if (window.player && player.getDuration) player.getDuration();") { res ->
+                webView?.evaluateJavascript("(function() { var p = window.ytAudioPlayer; return (p && typeof p.getDuration === 'function') ? p.getDuration() : 0; })();") { res ->
                     val clean = res?.replace("\"", "")?.trim()
                     val dur = clean?.toFloatOrNull() ?: 0f
                     if (dur > 0f) {
                         _durationMs.value = (dur * 1000L).toLong()
                     }
                 }
-                mainHandler.postDelayed(this, 400)
+                mainHandler.postDelayed(this, 350)
             }
         }
     }
@@ -108,16 +112,16 @@ class YouTubeAudioWebView(private val context: Context) {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
                     body, html { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
-                    #player { width:100%; height:100%; }
+                    #yt-player-container { width:100%; height:100%; }
                 </style>
             </head>
             <body>
-                <div id="player"></div>
+                <div id="yt-player-container"></div>
                 <script src="https://www.youtube.com/iframe_api"></script>
                 <script>
-                    var player;
+                    var ytAudioPlayer = null;
                     function onYouTubeIframeAPIReady() {
-                        player = new YT.Player('player', {
+                        ytAudioPlayer = new YT.Player('yt-player-container', {
                             height: '100%',
                             width: '100%',
                             videoId: '$videoId',
@@ -136,13 +140,14 @@ class YouTubeAudioWebView(private val context: Context) {
                                 'onError': onPlayerError
                             }
                         });
+                        window.ytAudioPlayer = ytAudioPlayer;
                     }
                     function onPlayerReady(event) {
                         AndroidBridge.onReady();
-                        if ($startSecInt > 0 && event.target.seekTo) {
+                        if ($startSecInt > 0 && event.target && typeof event.target.seekTo === 'function') {
                             event.target.seekTo($startSecInt, true);
                         }
-                        if ($autoplayInt === 1) {
+                        if ($autoplayInt === 1 && event.target && typeof event.target.playVideo === 'function') {
                             event.target.playVideo();
                         }
                     }
@@ -172,17 +177,20 @@ class YouTubeAudioWebView(private val context: Context) {
             if (wv != null && isApiReady) {
                 wv.evaluateJavascript(
                     """
-                    if (window.player) {
-                        if (player.loadVideoById) {
-                            player.loadVideoById({
+                    (function() {
+                        var p = window.ytAudioPlayer;
+                        if (p && typeof p.loadVideoById === 'function') {
+                            p.loadVideoById({
                                 videoId: '$videoId',
                                 startSeconds: $sec
                             });
+                            if (typeof p.playVideo === 'function') {
+                                p.playVideo();
+                            }
+                        } else {
+                            location.reload();
                         }
-                        if (player.playVideo) {
-                            player.playVideo();
-                        }
-                    }
+                    })();
                     """.trimIndent(),
                     null
                 )
@@ -195,7 +203,7 @@ class YouTubeAudioWebView(private val context: Context) {
     fun pauseTrack() {
         _isPlaying.value = false
         mainHandler.post {
-            webView?.evaluateJavascript("if (window.player && player.pauseVideo) player.pauseVideo();", null)
+            webView?.evaluateJavascript("if (window.ytAudioPlayer && typeof ytAudioPlayer.pauseVideo === 'function') ytAudioPlayer.pauseVideo();", null)
         }
         stopProgress()
     }
@@ -206,7 +214,7 @@ class YouTubeAudioWebView(private val context: Context) {
         currentVideoId = null
         mainHandler.post {
             webView?.evaluateJavascript(
-                "if (window.player) { if (player.stopVideo) player.stopVideo(); if (player.pauseVideo) player.pauseVideo(); }",
+                "if (window.ytAudioPlayer) { if (typeof ytAudioPlayer.stopVideo === 'function') ytAudioPlayer.stopVideo(); if (typeof ytAudioPlayer.pauseVideo === 'function') ytAudioPlayer.pauseVideo(); }",
                 null
             )
         }
@@ -216,7 +224,7 @@ class YouTubeAudioWebView(private val context: Context) {
     fun resumeTrack() {
         _isPlaying.value = true
         mainHandler.post {
-            webView?.evaluateJavascript("if (window.player && player.playVideo) player.playVideo();", null)
+            webView?.evaluateJavascript("if (window.ytAudioPlayer && typeof ytAudioPlayer.playVideo === 'function') ytAudioPlayer.playVideo();", null)
         }
         startProgress()
     }
@@ -231,22 +239,22 @@ class YouTubeAudioWebView(private val context: Context) {
         mainHandler.post {
             webView?.evaluateJavascript(
                 """
-                if (window.player) {
-                    if (player.seekTo) {
-                        player.seekTo($sec, true);
+                (function() {
+                    var p = window.ytAudioPlayer;
+                    if (p && typeof p.seekTo === 'function') {
+                        p.seekTo($sec, true);
+                        if (typeof p.playVideo === 'function') {
+                            p.playVideo();
+                        }
                     }
-                    if (player.playVideo) {
-                        player.playVideo();
-                    }
-                }
+                })();
                 """.trimIndent(),
                 null
             )
         }
 
-        mainHandler.postDelayed({
-            isSeeking = false
-        }, 1500)
+        mainHandler.removeCallbacks(seekResetRunnable)
+        mainHandler.postDelayed(seekResetRunnable, 3000)
     }
 
     private fun startProgress() {
@@ -273,6 +281,7 @@ class YouTubeAudioWebView(private val context: Context) {
                 when (state) {
                     1 -> { // YT.PlayerState.PLAYING
                         isSeeking = false
+                        mainHandler.removeCallbacks(seekResetRunnable)
                         _isPlaying.value = true
                         _isLoading.value = false
                         startProgress()
@@ -285,8 +294,9 @@ class YouTubeAudioWebView(private val context: Context) {
                             stopProgress()
                             Log.i(tag, "Состояние: PAUSED")
                         } else {
+                            // Во время перемотки YouTube переходит в state 2 кратковременно - держим воспроизведение
                             mainHandler.post {
-                                webView?.evaluateJavascript("if (window.player && player.playVideo) player.playVideo();", null)
+                                webView?.evaluateJavascript("if (window.ytAudioPlayer && typeof ytAudioPlayer.playVideo === 'function') ytAudioPlayer.playVideo();", null)
                             }
                         }
                     }
@@ -319,6 +329,7 @@ class YouTubeAudioWebView(private val context: Context) {
 
     fun release() {
         stopProgress()
+        mainHandler.removeCallbacks(seekResetRunnable)
         mainHandler.post {
             webView?.destroy()
             webView = null

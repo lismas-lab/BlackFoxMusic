@@ -111,8 +111,28 @@ fun FullPlayerSheet(
         }
     }
 
-    val progressFraction = if (totalDurationMs > 0) {
-        (currentPositionMs.toFloat() / totalDurationMs).coerceIn(0f, 1f)
+    val effectiveTotalDurationMs = remember(totalDurationMs, track.duration, track.durationSeconds) {
+        when {
+            totalDurationMs > 0L -> totalDurationMs
+            track.durationSeconds > 0L -> track.durationSeconds * 1000L
+            track.duration.isNotBlank() -> {
+                try {
+                    val parts = track.duration.split(":").map { it.trim().toInt() }
+                    when (parts.size) {
+                        2 -> ((parts[0] * 60) + parts[1]) * 1000L
+                        3 -> ((parts[0] * 3600) + (parts[1] * 60) + parts[2]) * 1000L
+                        else -> 0L
+                    }
+                } catch (_: Exception) {
+                    0L
+                }
+            }
+            else -> 0L
+        }
+    }
+
+    val progressFraction = if (effectiveTotalDurationMs > 0) {
+        (currentPositionMs.toFloat() / effectiveTotalDurationMs).coerceIn(0f, 1f)
     } else 0f
 
     fun formatTime(ms: Long): String {
@@ -399,7 +419,9 @@ fun FullPlayerSheet(
                     userSeekFraction = frac
                 },
                 onValueChangeFinished = {
-                    onSeekTo((userSeekFraction * totalDurationMs).toLong())
+                    if (effectiveTotalDurationMs > 0L) {
+                        onSeekTo((userSeekFraction * effectiveTotalDurationMs).toLong())
+                    }
                     isUserSeeking = false
                 },
                 colors = SliderDefaults.colors(
@@ -421,7 +443,7 @@ fun FullPlayerSheet(
                     fontSize = 12.sp
                 )
                 Text(
-                    text = formatTime(totalDurationMs),
+                    text = formatTime(if (totalDurationMs > 0) totalDurationMs else effectiveTotalDurationMs),
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
