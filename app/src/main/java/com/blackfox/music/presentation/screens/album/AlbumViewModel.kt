@@ -5,9 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.blackfox.music.data.download.AudioDownloadManager
 import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.local.PlaylistEntity
-import com.blackfox.music.data.local.PlaylistTrackCrossRef
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.InnerTubeRepository
+import com.blackfox.music.data.repository.PlaylistRepository
 import com.blackfox.music.domain.model.Album
 import com.blackfox.music.domain.model.Track
 import kotlinx.coroutines.flow.*
@@ -23,6 +23,7 @@ class AlbumViewModel(
     private val browseId: String,
     private val repository: InnerTubeRepository = InnerTubeRepository(),
     private val downloadManager: AudioDownloadManager,
+    private val playlistRepository: PlaylistRepository,
     private val musicDao: MusicDao
 ) : ViewModel() {
 
@@ -32,6 +33,10 @@ class AlbumViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favoriteTrackIds: StateFlow<Set<String>> = musicDao.getFavoriteTrackIds()
+        .map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val downloadedTrackIds: StateFlow<Set<String>> = musicDao.getDownloadedTrackIds()
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
@@ -80,24 +85,25 @@ class AlbumViewModel(
             } else {
                 musicDao.updateFavorite(track.id, newFav)
             }
+            if (newFav) {
+                downloadManager.downloadTrack(track)
+            }
         }
     }
 
-    fun addTrackToPlaylist(playlistId: Long, track: Track) {
+    fun getPlaylistIdsForTrack(trackId: String): Flow<List<Long>> {
+        return playlistRepository.getPlaylistIdsForTrack(trackId)
+    }
+
+    fun toggleTrackInPlaylist(playlistId: Long, track: Track) {
         viewModelScope.launch {
-            musicDao.insertTrack(
-                TrackEntity(
-                    id = track.id,
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    duration = track.duration,
-                    thumbnailUrl = track.thumbnailUrl
-                )
-            )
-            musicDao.addTrackToPlaylist(
-                PlaylistTrackCrossRef(playlistId = playlistId, trackId = track.id)
-            )
+            playlistRepository.toggleTrackInPlaylist(playlistId, track)
+        }
+    }
+
+    fun createPlaylistAndAddTrack(name: String, track: Track) {
+        viewModelScope.launch {
+            playlistRepository.createPlaylistAndAddTrack(name, track)
         }
     }
 }

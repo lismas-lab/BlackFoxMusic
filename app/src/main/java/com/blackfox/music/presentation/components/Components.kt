@@ -18,7 +18,7 @@ import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.download.DownloadStatus
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -119,6 +119,7 @@ fun TrackListItem(
     onAddToPlaylistClick: () -> Unit,
     onDownloadClick: () -> Unit,
     downloadProgress: DownloadProgress? = null,
+    isDownloaded: Boolean = track.isDownloaded,
     modifier: Modifier = Modifier
 ) {
     val heartColor by animateColorAsState(
@@ -127,7 +128,7 @@ fun TrackListItem(
     )
 
     val isDownloading = downloadProgress?.status == DownloadStatus.DOWNLOADING
-    val isCompleted = track.isDownloaded || downloadProgress?.status == DownloadStatus.COMPLETED
+    val isCompleted = isDownloaded || track.isDownloaded || downloadProgress?.status == DownloadStatus.COMPLETED
 
     Row(
         modifier = modifier
@@ -282,7 +283,7 @@ fun TrackListItem(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.PlaylistAdd,
+                    imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
                     contentDescription = "В плейлист",
                     tint = TextSecondary,
                     modifier = Modifier.size(21.dp)

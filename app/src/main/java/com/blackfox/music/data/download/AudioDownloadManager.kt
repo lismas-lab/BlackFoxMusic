@@ -36,13 +36,13 @@ class AudioDownloadManager(
         .followSslRedirects(true)
         .build()
 
-    private val musicDirectory: File by lazy {
+    val musicDirectory: File by lazy {
         val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "BlackFox")
         if (!dir.exists()) dir.mkdirs()
         dir
     }
 
-    private val coversDirectory: File by lazy {
+    val coversDirectory: File by lazy {
         val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Covers")
         if (!dir.exists()) dir.mkdirs()
         dir
@@ -55,10 +55,20 @@ class AudioDownloadManager(
         if (downloadJobs[track.id]?.isActive == true) return
 
         val job = scope.launch {
+            val extGuess = "mp3"
+            val tempFile = File(musicDirectory, "${track.id}.tmp")
+
             try {
+                // Проверяем: возможно трек уже полностью скачан и файл на месте
+                val existing = musicDao.getTrackById(track.id)
+                if (existing?.isDownloaded == true && existing.localFilePath != null && File(existing.localFilePath).exists()) {
+                    updateProgress(track.id, DownloadProgress(track.id, 100, 0, 0, DownloadStatus.COMPLETED))
+                    return@launch
+                }
+
                 updateProgress(track.id, DownloadProgress(track.id, 5, 0, 0, DownloadStatus.DOWNLOADING))
 
-                // 1. Получаем прямую ссылку на аудиопоток с отображением прогресса подготовки
+                // 1. Получаем прямую ссылку на аудиопоток
                 val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id) { prepPercent ->
                     updateProgress(track.id, DownloadProgress(track.id, prepPercent, 0, 0, DownloadStatus.DOWNLOADING))
                 }
@@ -67,28 +77,42 @@ class AudioDownloadManager(
                     return@launch
                 }
 
-                // 2. Убеждаемся, что трек есть в локальной базе
-                musicDao.insertTrack(
-                    TrackEntity(
-                        id = track.id,
-                        title = track.title,
-                        artist = track.artist,
-                        album = track.album,
-                        duration = track.duration,
-                        thumbnailUrl = track.thumbnailUrl,
-                        isDownloaded = false
+                // 2. Убеждаемся, что трек есть в локальной базе (не затирая статус isFavorite)
+                val isFav = existing?.isFavorite ?: false
+                if (existing == null) {
+                    musicDao.insertTrack(
+                        TrackEntity(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            duration = track.duration,
+                            thumbnailUrl = track.thumbnailUrl,
+                            isDownloaded = false,
+                            isFavorite = isFav
+                        )
                     )
-                )
+                }
 
-                // 3. Скачиваем аудиофайл с отображением прогресса
+                // 3. Скачиваем аудиофайл ВО ВРЕМЕННЫЙ ФАЙЛ, чтобы плеер не пытался играть недокачанный поток
                 val ext = if (directStreamUrl.contains(".m4a") || directStreamUrl.contains("audio/mp4")) "m4a" else "mp3"
-                val audioFile = File(musicDirectory, "${track.id}.$ext")
+                val finalFile = File(musicDirectory, "${track.id}.$ext")
 
-                val totalBytes = downloadFileWithProgress(directStreamUrl, audioFile) { percent, downloaded, total ->
+                if (tempFile.exists()) tempFile.delete()
+
+                val totalBytes = downloadFileWithProgress(directStreamUrl, tempFile) { percent, downloaded, total ->
                     updateProgress(
                         track.id,
                         DownloadProgress(track.id, percent, downloaded, total, DownloadStatus.DOWNLOADING)
                     )
+                }
+
+                // Атомарно переименовываем в финальный файл только при успешном завершении
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    if (finalFile.exists()) finalFile.delete()
+                    tempFile.renameTo(finalFile)
+                } else {
+                    throw IOException("Файл скачался пустым")
                 }
 
                 // 4. Скачиваем обложку для оффлайна
@@ -105,7 +129,7 @@ class AudioDownloadManager(
                 musicDao.updateDownloadStatus(
                     trackId = track.id,
                     isDownloaded = true,
-                    filePath = audioFile.absolutePath,
+                    filePath = finalFile.absolutePath,
                     downloadedAt = System.currentTimeMillis()
                 )
 
@@ -115,8 +139,10 @@ class AudioDownloadManager(
                 )
 
             } catch (e: CancellationException) {
+                if (tempFile.exists()) tempFile.delete()
                 updateProgress(track.id, DownloadProgress(track.id, 0, 0, 0, DownloadStatus.FAILED, "Отменено"))
             } catch (e: Exception) {
+                if (tempFile.exists()) tempFile.delete()
                 updateProgress(track.id, DownloadProgress(track.id, 0, 0, 0, DownloadStatus.FAILED, e.localizedMessage))
             } finally {
                 downloadJobs.remove(track.id)
@@ -140,6 +166,9 @@ class AudioDownloadManager(
         downloadJobs[trackId]?.cancel()
         downloadJobs.remove(trackId)
 
+        val tmp = File(musicDirectory, "$trackId.tmp")
+        if (tmp.exists()) tmp.delete()
+
         val mp3 = File(musicDirectory, "$trackId.mp3")
         if (mp3.exists()) mp3.delete()
 
@@ -157,6 +186,23 @@ class AudioDownloadManager(
         )
 
         _downloadProgressMap.value = _downloadProgressMap.value - trackId
+    }
+
+    fun getDownloadedStorageSize(): Long {
+        var size = 0L
+        musicDirectory.listFiles()?.forEach { size += it.length() }
+        coversDirectory.listFiles()?.forEach { size += it.length() }
+        return size
+    }
+
+    suspend fun clearAllDownloaded() = withContext(Dispatchers.IO) {
+        downloadJobs.values.forEach { it.cancel() }
+        downloadJobs.clear()
+
+        musicDirectory.listFiles()?.forEach { it.delete() }
+        coversDirectory.listFiles()?.forEach { it.delete() }
+        musicDao.resetAllDownloadedStatus()
+        _downloadProgressMap.value = emptyMap()
     }
 
     private suspend fun downloadFileWithProgress(

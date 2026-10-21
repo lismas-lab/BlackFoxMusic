@@ -2,11 +2,12 @@ package com.blackfox.music.presentation.screens.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.blackfox.music.data.download.AudioDownloadManager
 import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.local.PlaylistEntity
-import com.blackfox.music.data.local.PlaylistTrackCrossRef
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.InnerTubeRepository
+import com.blackfox.music.data.repository.PlaylistRepository
 import com.blackfox.music.domain.model.Album
 import com.blackfox.music.domain.model.Track
 import kotlinx.coroutines.FlowPreview
@@ -29,7 +30,9 @@ data class SearchUiState(
 @OptIn(FlowPreview::class)
 class SearchViewModel(
     private val repository: InnerTubeRepository = InnerTubeRepository(),
-    private val musicDao: MusicDao
+    private val musicDao: MusicDao,
+    private val downloadManager: AudioDownloadManager,
+    private val playlistRepository: PlaylistRepository
 ) : ViewModel() {
 
     val query = MutableStateFlow("")
@@ -39,8 +42,13 @@ class SearchViewModel(
     val playlists: StateFlow<List<PlaylistEntity>> = musicDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Реактивный список ID избранных треков напрямую из базы данных Room
+    // Реактивный список ID избранных треков
     val favoriteTrackIds: StateFlow<Set<String>> = musicDao.getFavoriteTrackIds()
+        .map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    // Реактивный список ID скачанных треков (для глобальной синхронизации галочек)
+    val downloadedTrackIds: StateFlow<Set<String>> = musicDao.getDownloadedTrackIds()
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
@@ -126,51 +134,30 @@ class SearchViewModel(
             } else {
                 musicDao.updateFavorite(track.id, newFav)
             }
+            if (newFav) {
+                // Автоматическое скачивание при добавлении в Любимое
+                downloadManager.downloadTrack(track)
+            }
         }
+    }
+
+    fun downloadTrack(track: Track) {
+        downloadManager.downloadTrack(track)
+    }
+
+    fun getPlaylistIdsForTrack(trackId: String): Flow<List<Long>> {
+        return playlistRepository.getPlaylistIdsForTrack(trackId)
     }
 
     fun toggleTrackInPlaylist(playlistId: Long, track: Track) {
         viewModelScope.launch {
-            musicDao.insertTrack(
-                TrackEntity(
-                    id = track.id,
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    duration = track.duration,
-                    thumbnailUrl = track.thumbnailUrl
-                )
-            )
-            musicDao.addTrackToPlaylist(
-                PlaylistTrackCrossRef(
-                    playlistId = playlistId,
-                    trackId = track.id
-                )
-            )
+            playlistRepository.toggleTrackInPlaylist(playlistId, track)
         }
     }
 
     fun createPlaylistAndAddTrack(name: String, track: Track) {
         viewModelScope.launch {
-            val newPlaylistId = musicDao.insertPlaylist(
-                PlaylistEntity(name = name)
-            )
-            musicDao.insertTrack(
-                TrackEntity(
-                    id = track.id,
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    duration = track.duration,
-                    thumbnailUrl = track.thumbnailUrl
-                )
-            )
-            musicDao.addTrackToPlaylist(
-                PlaylistTrackCrossRef(
-                    playlistId = newPlaylistId,
-                    trackId = track.id
-                )
-            )
+            playlistRepository.createPlaylistAndAddTrack(name, track)
         }
     }
 }

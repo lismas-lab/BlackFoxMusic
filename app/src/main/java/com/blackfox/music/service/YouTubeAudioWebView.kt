@@ -180,6 +180,19 @@ class YouTubeAudioWebView(private val context: Context) {
         stopProgress()
     }
 
+    fun stopTrack() {
+        _isPlaying.value = false
+        _isLoading.value = false
+        currentVideoId = null
+        mainHandler.post {
+            webView?.evaluateJavascript(
+                "if (window.player) { if (player.stopVideo) player.stopVideo(); if (player.pauseVideo) player.pauseVideo(); }",
+                null
+            )
+        }
+        stopProgress()
+    }
+
     fun resumeTrack() {
         _isPlaying.value = true
         mainHandler.post {

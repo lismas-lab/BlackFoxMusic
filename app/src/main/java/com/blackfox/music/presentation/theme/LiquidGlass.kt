@@ -23,10 +23,11 @@ fun Modifier.liquidGlass(
     cornerRadius: Dp = 20.dp,
     backgroundColor: Color = GlassSurface,
     borderColor: Color = GlassBorder,
-    borderWidth: Dp = 1.dp
+    borderWidth: Dp = 1.dp,
+    borderBrush: Brush? = null
 ): Modifier {
     val shape = RoundedCornerShape(cornerRadius)
-    val borderBrush = Brush.verticalGradient(
+    val finalBrush = borderBrush ?: Brush.verticalGradient(
         listOf(
             borderColor,
             Color.White.copy(alpha = 0.03f),
@@ -37,7 +38,7 @@ fun Modifier.liquidGlass(
     return this
         .clip(shape)
         .background(backgroundColor, shape)
-        .border(borderWidth, borderBrush, shape)
+        .border(borderWidth, finalBrush, shape)
 }
 
 /**

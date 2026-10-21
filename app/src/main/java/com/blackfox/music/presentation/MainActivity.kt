@@ -2,6 +2,7 @@ package com.blackfox.music.presentation
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,9 +19,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.OfflinePin
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,21 +38,26 @@ import com.blackfox.music.BlackFoxApp
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Track
+import com.blackfox.music.presentation.components.AddToPlaylistBottomSheet
 import com.blackfox.music.presentation.components.FloatingMiniPlayer
 import com.blackfox.music.presentation.screens.album.AlbumScreen
 import com.blackfox.music.presentation.screens.album.AlbumViewModel
-import com.blackfox.music.presentation.screens.downloads.DownloadsScreen
+import com.blackfox.music.presentation.screens.home.HomeScreen
+import com.blackfox.music.presentation.screens.mymusic.FavoritesDetailScreen
+import com.blackfox.music.presentation.screens.mymusic.MyMusicScreen
+import com.blackfox.music.presentation.screens.mymusic.PlaylistDetailScreen
 import com.blackfox.music.presentation.screens.player.FullPlayerSheet
-import com.blackfox.music.presentation.screens.search.SearchScreen
 import com.blackfox.music.presentation.screens.search.SearchViewModel
+import com.blackfox.music.presentation.screens.settings.SettingsScreen
 import com.blackfox.music.presentation.theme.*
 import com.blackfox.music.service.AudioPlayerManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 enum class MainTab(val title: String, val icon: ImageVector) {
-    SEARCH("Поиск", Icons.Default.Search),
-    DOWNLOADS("Оффлайн", Icons.Default.OfflinePin),
-    FAVORITES("Избранное", Icons.Default.Favorite)
+    HOME("Главная", Icons.Default.Home),
+    MY_MUSIC("Моя музыка", Icons.Default.LibraryMusic),
+    SETTINGS("Настройки", Icons.Default.Settings)
 }
 
 class MainActivity : ComponentActivity() {
@@ -66,13 +72,14 @@ class MainActivity : ComponentActivity() {
         val musicDao = app.database.musicDao()
         val repository = InnerTubeRepository()
         val downloadManager = app.downloadManager
+        val playlistRepository = app.playlistRepository
         playerManager = app.playerManager
 
         setContent {
             BlackFoxTheme {
                 val coroutineScope = rememberCoroutineScope()
 
-                // Запрос разрешения на показ уведомлений (Android 13+) для шторки и экрана блокировки
+                // Запрос разрешения на показ уведомлений (Android 13+) для фонового плеера и шторки
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { /* разрешение обработано */ }
@@ -89,40 +96,61 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Навигация
-                var currentTab by remember { mutableStateOf(MainTab.SEARCH) }
+                // Навигационные состояния
+                var currentTab by remember { mutableStateOf(MainTab.HOME) }
                 var selectedAlbumBrowseId by remember { mutableStateOf<String?>(null) }
+                var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
+                var isFavoritesOpen by remember { mutableStateOf(false) }
                 var isFullPlayerVisible by remember { mutableStateOf(false) }
+                var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
 
                 // Жест "Назад" и системная кнопка "Назад"
-                BackHandler(enabled = isFullPlayerVisible || selectedAlbumBrowseId != null || currentTab != MainTab.SEARCH) {
+                BackHandler(
+                    enabled = isFullPlayerVisible || selectedAlbumBrowseId != null ||
+                            selectedPlaylistId != null || isFavoritesOpen || currentTab != MainTab.HOME
+                ) {
                     when {
                         isFullPlayerVisible -> isFullPlayerVisible = false
                         selectedAlbumBrowseId != null -> selectedAlbumBrowseId = null
-                        currentTab != MainTab.SEARCH -> currentTab = MainTab.SEARCH
+                        selectedPlaylistId != null -> selectedPlaylistId = null
+                        isFavoritesOpen -> isFavoritesOpen = false
+                        currentTab != MainTab.HOME -> currentTab = MainTab.HOME
                     }
                 }
 
-                // Состояние реального аудиоплеера
+                // Состояние аудиоплеера
                 val currentTrack by playerManager.currentTrack.collectAsState()
                 val isPlaying by playerManager.isPlaying.collectAsState()
                 val currentPositionMs by playerManager.currentPositionMs.collectAsState()
                 val totalDurationMs by playerManager.totalDurationMs.collectAsState()
-                val isLoadingAudio by playerManager.isLoadingAudio.collectAsState()
 
                 // Прогресс скачиваний треков
                 val downloadProgressMap by downloadManager.downloadProgressMap.collectAsState()
 
                 // Данные из базы Room
-                val downloadedTracks by musicDao.getDownloadedTracks().collectAsState(initial = emptyList())
+                val userPlaylists by playlistRepository.getAllUserPlaylists().collectAsState(initial = emptyList())
                 val favoriteTracks by musicDao.getFavoriteTracks().collectAsState(initial = emptyList())
                 val favoriteTrackIds by musicDao.getFavoriteTrackIds().collectAsState(initial = emptyList())
+                val downloadedCount by musicDao.getDownloadedCount().collectAsState(initial = 0)
                 val favoriteSet = remember(favoriteTrackIds) { favoriteTrackIds.toSet() }
 
-                val searchViewModel = viewModel {
-                    SearchViewModel(repository = repository, musicDao = musicDao)
+                var storageSizeBytes by remember { mutableStateOf(0L) }
+                LaunchedEffect(downloadProgressMap, downloadedCount) {
+                    coroutineScope.launch(Dispatchers.IO) {
+                        storageSizeBytes = downloadManager.getDownloadedStorageSize()
+                    }
                 }
 
+                val searchViewModel = viewModel {
+                    SearchViewModel(
+                        repository = repository,
+                        musicDao = musicDao,
+                        downloadManager = downloadManager,
+                        playlistRepository = playlistRepository
+                    )
+                }
+
+                // Функция добавления/удаления из Любимого с автоматическим скачиванием
                 fun toggleFavorite(track: Track) {
                     coroutineScope.launch {
                         val isFav = favoriteSet.contains(track.id)
@@ -143,6 +171,41 @@ class MainActivity : ComponentActivity() {
                         } else {
                             musicDao.updateFavorite(track.id, newFav)
                         }
+                        if (newFav) {
+                            // Автоматически скачиваем трек при добавлении в любимое
+                            downloadManager.downloadTrack(track)
+                        }
+                    }
+                }
+
+                // Вспомогательная функция запуска воспроизведения любимых треков
+                fun playFavorites(shuffle: Boolean = false) {
+                    val domainTracks = favoriteTracks.map { entity ->
+                        Track(
+                            id = entity.id,
+                            title = entity.title,
+                            artist = entity.artist,
+                            album = entity.album,
+                            duration = entity.duration,
+                            thumbnailUrl = entity.thumbnailUrl,
+                            isDownloaded = entity.isDownloaded,
+                            localFilePath = entity.localFilePath
+                        )
+                    }
+                    if (domainTracks.isNotEmpty()) {
+                        val queue = if (shuffle) domainTracks.shuffled() else domainTracks
+                        playerManager.setQueueAndPlay(queue, 0)
+                    }
+                }
+
+                // Гарантированный запуск трека в очереди с точным поиском по ID
+                fun playTrackInQueue(track: Track, queue: List<Track>) {
+                    val idx = queue.indexOfFirst { it.id == track.id }
+                    if (idx != -1) {
+                        playerManager.setQueueAndPlay(queue, idx)
+                    } else {
+                        val newQueue = listOf(track) + queue
+                        playerManager.setQueueAndPlay(newQueue, 0)
                     }
                 }
 
@@ -159,80 +222,125 @@ class MainActivity : ComponentActivity() {
                             .alpha(0.001f)
                     )
 
-                    // Основной контент
-                    if (selectedAlbumBrowseId != null) {
+                    // ОСНОВНОЙ КОНТЕНТ
+                    when {
                         // Экран Альбома
-                        val albumViewModel = remember(selectedAlbumBrowseId) {
-                            AlbumViewModel(
-                                browseId = selectedAlbumBrowseId!!,
-                                repository = repository,
-                                downloadManager = downloadManager,
-                                musicDao = musicDao
+                        selectedAlbumBrowseId != null -> {
+                            val albumViewModel = remember(selectedAlbumBrowseId) {
+                                AlbumViewModel(
+                                    browseId = selectedAlbumBrowseId!!,
+                                    repository = repository,
+                                    downloadManager = downloadManager,
+                                    playlistRepository = playlistRepository,
+                                    musicDao = musicDao
+                                )
+                            }
+
+                            AlbumScreen(
+                                viewModel = albumViewModel,
+                                onBackClick = { selectedAlbumBrowseId = null },
+                                onPlayTrack = { track ->
+                                    val albumTracks = albumViewModel.uiState.value.album?.tracks ?: listOf(track)
+                                    playTrackInQueue(track, albumTracks)
+                                },
+                                downloadProgressMap = downloadProgressMap
                             )
                         }
 
-                        AlbumScreen(
-                            viewModel = albumViewModel,
-                            onBackClick = { selectedAlbumBrowseId = null },
-                            onPlayTrack = { track ->
-                                val albumTracks = albumViewModel.uiState.value.album?.tracks ?: listOf(track)
-                                val idx = albumTracks.indexOf(track).coerceAtLeast(0)
-                                playerManager.setQueueAndPlay(albumTracks, idx)
-                            },
-                            downloadProgressMap = downloadProgressMap
-                        )
-                    } else {
-                        // Вкладки нижнего меню
-                        when (currentTab) {
-                            MainTab.SEARCH -> {
-                                SearchScreen(
-                                    viewModel = searchViewModel,
-                                    onTrackPlay = { track ->
-                                        val tracks = searchViewModel.uiState.value.tracks
-                                        val idx = tracks.indexOf(track).coerceAtLeast(0)
-                                        playerManager.setQueueAndPlay(tracks, idx)
-                                    },
-                                    onAlbumClick = { album ->
-                                        selectedAlbumBrowseId = album.browseId
-                                    },
-                                    onDownloadTrack = { track ->
-                                        downloadManager.downloadTrack(track)
-                                    },
-                                    downloadProgressMap = downloadProgressMap
-                                )
-                            }
-                            MainTab.DOWNLOADS -> {
-                                val offlineTracks = remember(downloadedTracks) {
-                                    downloadedTracks.map { entity ->
-                                        Track(
-                                            id = entity.id,
-                                            title = entity.title,
-                                            artist = entity.artist,
-                                            album = entity.album,
-                                            duration = entity.duration,
-                                            thumbnailUrl = entity.thumbnailUrl,
-                                            isDownloaded = true,
-                                            localFilePath = entity.localFilePath
-                                        )
-                                    }
-                                }
-
-                                DownloadsScreen(
-                                    downloadedTracks = downloadedTracks,
+                        // Экран детального просмотра Плейлиста
+                        selectedPlaylistId != null -> {
+                            val currentPlWithTracks = userPlaylists.find { it.playlist.playlistId == selectedPlaylistId }
+                            if (currentPlWithTracks != null) {
+                                PlaylistDetailScreen(
+                                    playlistWithTracks = currentPlWithTracks,
+                                    favoriteTrackIds = favoriteSet,
+                                    downloadProgressMap = downloadProgressMap,
+                                    onBackClick = { selectedPlaylistId = null },
                                     onTrackClick = { track ->
-                                        val idx = offlineTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
-                                        playerManager.setQueueAndPlay(offlineTracks, idx)
+                                        val domainList = currentPlWithTracks.tracks.map { entity ->
+                                            Track(
+                                                id = entity.id,
+                                                title = entity.title,
+                                                artist = entity.artist,
+                                                album = entity.album,
+                                                duration = entity.duration,
+                                                thumbnailUrl = entity.thumbnailUrl,
+                                                isDownloaded = entity.isDownloaded,
+                                                localFilePath = entity.localFilePath
+                                            )
+                                        }
+                                        playTrackInQueue(track, domainList)
                                     },
-                                    onDeleteTrack = { trackId ->
+                                    onPlayAll = {
+                                        val domainList = currentPlWithTracks.tracks.map { entity ->
+                                            Track(
+                                                id = entity.id,
+                                                title = entity.title,
+                                                artist = entity.artist,
+                                                album = entity.album,
+                                                duration = entity.duration,
+                                                thumbnailUrl = entity.thumbnailUrl,
+                                                isDownloaded = entity.isDownloaded,
+                                                localFilePath = entity.localFilePath
+                                            )
+                                        }
+                                        if (domainList.isNotEmpty()) {
+                                            playerManager.setQueueAndPlay(domainList, 0)
+                                        }
+                                    },
+                                    onShuffle = {
+                                        val domainList = currentPlWithTracks.tracks.map { entity ->
+                                            Track(
+                                                id = entity.id,
+                                                title = entity.title,
+                                                artist = entity.artist,
+                                                album = entity.album,
+                                                duration = entity.duration,
+                                                thumbnailUrl = entity.thumbnailUrl,
+                                                isDownloaded = entity.isDownloaded,
+                                                localFilePath = entity.localFilePath
+                                            )
+                                        }.shuffled()
+                                        if (domainList.isNotEmpty()) {
+                                            playerManager.setQueueAndPlay(domainList, 0)
+                                        }
+                                    },
+                                    onToggleFavorite = { track -> toggleFavorite(track) },
+                                    onRemoveTrack = { trackId ->
                                         coroutineScope.launch {
-                                            downloadManager.deleteDownloadedTrack(trackId)
+                                            playlistRepository.removeTrackFromPlaylist(currentPlWithTracks.playlist.playlistId, trackId)
+                                        }
+                                    },
+                                    onUpdateCover = { uri: Uri? ->
+                                        coroutineScope.launch {
+                                            playlistRepository.updatePlaylistCover(currentPlWithTracks.playlist.playlistId, uri)
+                                        }
+                                    },
+                                    onRenamePlaylist = { newName ->
+                                        coroutineScope.launch {
+                                            playlistRepository.renamePlaylist(currentPlWithTracks.playlist.playlistId, newName)
+                                        }
+                                    },
+                                    onDeletePlaylist = {
+                                        coroutineScope.launch {
+                                            playlistRepository.deletePlaylist(currentPlWithTracks.playlist.playlistId)
+                                            selectedPlaylistId = null
                                         }
                                     }
                                 )
+                            } else {
+                                selectedPlaylistId = null
                             }
-                            MainTab.FAVORITES -> {
-                                val favTracks = remember(favoriteTracks) {
-                                    favoriteTracks.map { entity ->
+                        }
+
+                        // Экран детального просмотра Любимого
+                        isFavoritesOpen -> {
+                            FavoritesDetailScreen(
+                                favoriteTracks = favoriteTracks,
+                                downloadProgressMap = downloadProgressMap,
+                                onBackClick = { isFavoritesOpen = false },
+                                onTrackClick = { track ->
+                                    val domainList = favoriteTracks.map { entity ->
                                         Track(
                                             id = entity.id,
                                             title = entity.title,
@@ -244,20 +352,78 @@ class MainActivity : ComponentActivity() {
                                             localFilePath = entity.localFilePath
                                         )
                                     }
+                                    playTrackInQueue(track, domainList)
+                                },
+                                onPlayAll = { playFavorites(shuffle = false) },
+                                onShuffle = { playFavorites(shuffle = true) },
+                                onToggleFavorite = { track -> toggleFavorite(track) },
+                                onAddToPlaylistClick = { track -> trackForPlaylistSheet = track }
+                            )
+                        }
+
+                        // Вкладки нижнего меню
+                        else -> {
+                            when (currentTab) {
+                                MainTab.HOME -> {
+                                    HomeScreen(
+                                        viewModel = searchViewModel,
+                                        favoriteTracks = favoriteTracks,
+                                        userPlaylistsCount = userPlaylists.size,
+                                        onTrackPlay = { track, queue ->
+                                            playTrackInQueue(track, queue)
+                                        },
+                                        onPlayFavorites = { playFavorites(shuffle = false) },
+                                        onAlbumClick = { album ->
+                                            selectedAlbumBrowseId = album.browseId
+                                        },
+                                        onNavigateToMyMusic = { currentTab = MainTab.MY_MUSIC },
+                                        onNavigateToFavorites = { isFavoritesOpen = true },
+                                        downloadProgressMap = downloadProgressMap
+                                    )
                                 }
 
-                                DownloadsScreen(
-                                    downloadedTracks = favoriteTracks,
-                                    onTrackClick = { track ->
-                                        val idx = favTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
-                                        playerManager.setQueueAndPlay(favTracks, idx)
-                                    },
-                                    onDeleteTrack = { trackId ->
-                                        coroutineScope.launch {
-                                            musicDao.updateFavorite(trackId, false)
+                                MainTab.MY_MUSIC -> {
+                                    MyMusicScreen(
+                                        userPlaylists = userPlaylists,
+                                        favoriteTracks = favoriteTracks,
+                                        onOpenFavorites = { isFavoritesOpen = true },
+                                        onPlayFavorites = { playFavorites(shuffle = false) },
+                                        onOpenPlaylist = { plId -> selectedPlaylistId = plId },
+                                        onCreatePlaylist = { name ->
+                                            coroutineScope.launch {
+                                                playlistRepository.createPlaylist(name)
+                                            }
+                                        },
+                                        onRenamePlaylist = { plId, newName ->
+                                            coroutineScope.launch {
+                                                playlistRepository.renamePlaylist(plId, newName)
+                                            }
+                                        },
+                                        onDeletePlaylist = { plId ->
+                                            coroutineScope.launch {
+                                                playlistRepository.deletePlaylist(plId)
+                                            }
+                                        },
+                                        onUpdatePlaylistCover = { plId, uri ->
+                                            coroutineScope.launch {
+                                                playlistRepository.updatePlaylistCover(plId, uri)
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
+
+                                MainTab.SETTINGS -> {
+                                    SettingsScreen(
+                                        downloadedTracksCount = downloadedCount,
+                                        storageSizeBytes = storageSizeBytes,
+                                        onClearAllDownloads = {
+                                            coroutineScope.launch {
+                                                downloadManager.clearAllDownloaded()
+                                                storageSizeBytes = 0L
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -290,18 +456,24 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxWidth()
                                 .height(64.dp)
                                 .floatingGlass(cornerRadius = 24.dp)
-                                .padding(horizontal = 24.dp),
+                                .padding(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.SpaceAround,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             MainTab.entries.forEach { tab ->
-                                val isSelected = currentTab == tab && selectedAlbumBrowseId == null
+                                val isSelected = currentTab == tab &&
+                                        selectedAlbumBrowseId == null &&
+                                        selectedPlaylistId == null &&
+                                        !isFavoritesOpen
+
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
                                             selectedAlbumBrowseId = null
+                                            selectedPlaylistId = null
+                                            isFavoritesOpen = false
                                             currentTab = tab
                                         }
                                         .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -315,7 +487,8 @@ class MainActivity : ComponentActivity() {
                                     Text(
                                         text = tab.title,
                                         color = if (isSelected) FoxOrange else TextMuted,
-                                        fontSize = 11.sp
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
                                     )
                                 }
                             }
@@ -343,17 +516,35 @@ class MainActivity : ComponentActivity() {
                                 onSeekTo = { newPos -> playerManager.seekTo(newPos) },
                                 onFavoriteToggle = { toggleFavorite(track) },
                                 onDownloadClick = { downloadManager.downloadTrack(track) },
-                                onAddToPlaylistClick = { /* Добавить в плейлист */ },
+                                onAddToPlaylistClick = { trackForPlaylistSheet = track },
                                 onCloseClick = { isFullPlayerVisible = false }
                             )
                         }
                     }
+
+                    // Общая шторка добавления трека в плейлист (вызывается из FullPlayerSheet, Favorites, etc.)
+                    trackForPlaylistSheet?.let { track ->
+                        val containingPlaylistIds by musicDao.getPlaylistIdsForTrack(track.id).collectAsState(initial = emptyList())
+                        val allRawPlaylists by musicDao.getAllPlaylists().collectAsState(initial = emptyList())
+                        AddToPlaylistBottomSheet(
+                            track = track,
+                            playlists = allRawPlaylists,
+                            containingPlaylistIds = remember(containingPlaylistIds) { containingPlaylistIds.toSet() },
+                            onDismiss = { trackForPlaylistSheet = null },
+                            onToggleTrackInPlaylist = { plId ->
+                                coroutineScope.launch {
+                                    playlistRepository.toggleTrackInPlaylist(plId, track)
+                                }
+                            },
+                            onCreatePlaylistAndAdd = { name ->
+                                coroutineScope.launch {
+                                    playlistRepository.createPlaylistAndAddTrack(name, track)
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
     }
 }

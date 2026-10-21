@@ -8,14 +8,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -45,6 +45,7 @@ fun AlbumScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val favorites by viewModel.favoriteTrackIds.collectAsState()
+    val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
 
     Box(
@@ -82,7 +83,7 @@ fun AlbumScreen(
                         ) {
                             IconButton(onClick = onBackClick) {
                                 Icon(
-                                    imageVector = Icons.Default.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Назад",
                                     tint = TextPrimary
                                 )
@@ -98,12 +99,13 @@ fun AlbumScreen(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(240.dp)
-                                .clip(RoundedCornerShape(26.dp))
-                                .liquidGlass(cornerRadius = 26.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .liquidGlass(cornerRadius = 24.dp)
                         )
 
                         Spacer(modifier = Modifier.height(18.dp))
 
+                        // Название альбома
                         Text(
                             text = album.title,
                             color = TextPrimary,
@@ -115,98 +117,129 @@ fun AlbumScreen(
 
                         Spacer(modifier = Modifier.height(4.dp))
 
+                        // Артист • Год • Количество песен
                         Text(
-                            text = "${album.artist} • ${album.year} • ${album.trackCount} треков",
+                            text = "${album.artist} • ${album.year} • ${album.tracks.size} треков",
                             color = TextSecondary,
                             fontSize = 14.sp
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
 
-                        // Кнопки управления (Play All, Shuffle, Download All)
+                        // Кнопки управления (Слушать всё / Перемешать / Скачать альбом)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Кнопка Слушать Всё (Play All)
+                            // Кнопка Play All
                             Button(
                                 onClick = {
-                                    if (album.tracks.isNotEmpty()) onPlayTrack(album.tracks.first())
+                                    if (album.tracks.isNotEmpty()) {
+                                        onPlayTrack(album.tracks.first())
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = FoxOrange),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.height(46.dp)
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = ObsidianBlack)
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = ObsidianBlack,
+                                    modifier = Modifier.size(20.dp)
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Слушать", color = ObsidianBlack, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "Слушать всё",
+                                    color = ObsidianBlack,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
                             }
 
-                            Spacer(modifier = Modifier.width(12.dp))
+                            // Кнопка Shuffle
+                            IconButton(
+                                onClick = {
+                                    if (album.tracks.isNotEmpty()) {
+                                        onPlayTrack(album.tracks.shuffled().first())
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0x18FFFFFF))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Shuffle,
+                                    contentDescription = "Перемешать",
+                                    tint = TextPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
 
-                            // Скачать весь альбом
+                            // Кнопка Скачать альбом целиком
                             IconButton(
                                 onClick = { viewModel.downloadEntireAlbum() },
                                 modifier = Modifier
                                     .size(46.dp)
-                                    .clip(CircleShape)
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(Color(0x18FFFFFF))
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Download,
-                                    contentDescription = "Скачать всё",
-                                    tint = FoxOrange
+                                    contentDescription = "Скачать альбом",
+                                    tint = FoxOrange,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(18.dp))
                     }
                 }
 
                 // Список треков альбома
-                itemsIndexed(album.tracks) { index, track ->
+                itemsIndexed(album.tracks, key = { _, tr -> tr.id }) { index, track ->
                     val isFav = favorites.contains(track.id)
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onPlayTrack(track) }
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Порядковый номер
                         Text(
-                            text = String.format("%02d", index + 1),
+                            text = "${index + 1}",
                             color = TextMuted,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.width(28.dp)
                         )
 
-                        Spacer(modifier = Modifier.width(10.dp))
-
+                        // Название и длительность
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = track.title,
                                 color = TextPrimary,
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            if (track.duration.isNotBlank()) {
-                                Text(
-                                    text = track.duration,
-                                    color = TextSecondary,
-                                    fontSize = 13.sp
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = track.duration,
+                                color = TextSecondary,
+                                fontSize = 13.sp
+                            )
                         }
 
                         // Скачать с индикатором прогресса
                         val dlProgress = downloadProgressMap[track.id]
                         val isDl = dlProgress?.status == DownloadStatus.DOWNLOADING
-                        val isDone = track.isDownloaded || dlProgress?.status == DownloadStatus.COMPLETED
+                        val isDone = downloadedTrackIds.contains(track.id) || track.isDownloaded || dlProgress?.status == DownloadStatus.COMPLETED
 
                         Box(
                             modifier = Modifier
@@ -273,7 +306,7 @@ fun AlbumScreen(
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.PlaylistAdd,
+                                imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
                                 contentDescription = "В плейлист",
                                 tint = TextSecondary,
                                 modifier = Modifier.size(20.dp)
@@ -284,17 +317,21 @@ fun AlbumScreen(
             }
         }
 
-        // Шторка быстрого добавления в плейлист
+        // Шторка быстрого добавления в плейлист с РЕАКТИВНЫМ статусом
         selectedTrackForPlaylist?.let { track ->
+            val containingPlaylistIds by viewModel.getPlaylistIdsForTrack(track.id).collectAsState(initial = emptyList())
+
             AddToPlaylistBottomSheet(
                 track = track,
                 playlists = playlists,
+                containingPlaylistIds = remember(containingPlaylistIds) { containingPlaylistIds.toSet() },
                 onDismiss = { selectedTrackForPlaylist = null },
                 onToggleTrackInPlaylist = { plId ->
-                    viewModel.addTrackToPlaylist(plId, track)
+                    viewModel.toggleTrackInPlaylist(plId, track)
                 },
-                onCreatePlaylistAndAdd = { name -> },
-                isPlaylistContainsTrack = { false }
+                onCreatePlaylistAndAdd = { name ->
+                    viewModel.createPlaylistAndAddTrack(name, track)
+                }
             )
         }
     }

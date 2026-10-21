@@ -12,6 +12,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -39,7 +40,7 @@ class AudioPlayerManager(
 
     private var activeEngine = PlaybackEngine.NONE
 
-    // 1. Центральный движок ExoPlayer с аудифокусом, Wakelock и фоновым воспроизведением
+    // 1. Центральный движок ExoPlayer с аудиофокусом, Wakelock и фоновым воспроизведением
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setAudioAttributes(
             AudioAttributes.Builder()
@@ -107,6 +108,18 @@ class AudioPlayerManager(
                     }
                 }
             }
+
+            override fun onPlayerError(error: PlaybackException) {
+                // Если ExoPlayer не смог проиграть поток, бесшовно переключаемся на WebView fallback
+                if (activeEngine == PlaybackEngine.EXOPLAYER) {
+                    activeEngine = PlaybackEngine.WEBVIEW
+                    player.stop()
+                    player.clearMediaItems()
+                    _currentTrack.value?.let { tr ->
+                        webViewEngine.playTrack(tr.id)
+                    }
+                }
+            }
         })
 
         // Слушатели событий WebView движка
@@ -168,15 +181,15 @@ class AudioPlayerManager(
     }
 
     fun setQueueAndPlay(tracks: List<Track>, startIndex: Int) {
+        if (tracks.isEmpty()) return
         _currentQueue.value = tracks
-        currentQueueIndex = startIndex.coerceIn(0, (tracks.size - 1).coerceAtLeast(0))
-        if (currentQueueIndex in tracks.indices) {
-            playTrack(tracks[currentQueueIndex])
-        }
+        currentQueueIndex = startIndex.coerceIn(0, tracks.lastIndex)
+        playTrack(tracks[currentQueueIndex])
     }
 
     fun playNext() {
         val queue = _currentQueue.value
+        if (queue.isEmpty()) return
         val nextIdx = currentQueueIndex + 1
         if (nextIdx in queue.indices) {
             currentQueueIndex = nextIdx
@@ -201,6 +214,12 @@ class AudioPlayerManager(
 
     fun playTrack(track: Track) {
         streamResolveJob?.cancel()
+
+        // ВАЖНО: Мгновенно останавливаем предыдущий играющий трек, чтобы звук сразу прекратился!
+        player.stop()
+        player.clearMediaItems()
+        webViewEngine.stopTrack()
+
         _currentTrack.value = track
         _currentPositionMs.value = 0L
 
@@ -210,21 +229,20 @@ class AudioPlayerManager(
         }
         _isLoadingAudio.value = true
 
-        // 1. Проверяем наличие скачанного файла на устройстве
+        // 1. Проверяем наличие полностью скачанного файла на устройстве
         val musicDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "BlackFox")
         val candidateMp3 = File(musicDirectory, "${track.id}.mp3")
         val candidateM4a = File(musicDirectory, "${track.id}.m4a")
 
         val localFile = when {
-            !track.localFilePath.isNullOrBlank() && File(track.localFilePath).exists() -> File(track.localFilePath)
-            candidateMp3.exists() -> candidateMp3
-            candidateM4a.exists() -> candidateM4a
+            !track.localFilePath.isNullOrBlank() && File(track.localFilePath).exists() && File(track.localFilePath).length() > 50_000L -> File(track.localFilePath)
+            candidateMp3.exists() && candidateMp3.length() > 50_000L -> candidateMp3
+            candidateM4a.exists() && candidateM4a.length() > 50_000L -> candidateM4a
             else -> null
         }
 
         if (localFile != null) {
             activeEngine = PlaybackEngine.EXOPLAYER
-            webViewEngine.pauseTrack()
             startPlaybackService()
 
             val mediaItem = buildMediaItem(track, Uri.fromFile(localFile))
@@ -239,9 +257,13 @@ class AudioPlayerManager(
         streamResolveJob = scope.launch(Dispatchers.IO) {
             val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id)
             withContext(Dispatchers.Main) {
+                // Убеждаемся, что за время загрузки ссылки пользователь не переключил на другой трек
+                if (_currentTrack.value?.id != track.id) {
+                    return@withContext
+                }
+
                 if (!directStreamUrl.isNullOrBlank()) {
                     activeEngine = PlaybackEngine.EXOPLAYER
-                    webViewEngine.pauseTrack()
                     startPlaybackService()
 
                     val mediaItem = buildMediaItem(track, Uri.parse(directStreamUrl))
@@ -340,14 +362,14 @@ class AudioPlayerManager(
         when (activeEngine) {
             PlaybackEngine.EXOPLAYER -> player.seekTo(positionMs)
             PlaybackEngine.WEBVIEW -> webViewEngine.seekTo(positionMs)
-            PlaybackEngine.NONE -> {}
+            PlaybackEngine.NONE -> Unit
         }
     }
 
     private fun startExoProgressTicker() {
         stopExoProgressTicker()
         exoProgressJob = scope.launch {
-            while (isActive) {
+            while (isActive && activeEngine == PlaybackEngine.EXOPLAYER) {
                 _currentPositionMs.value = player.currentPosition
                 val dur = player.duration
                 if (dur > 0) _totalDurationMs.value = dur
@@ -364,11 +386,10 @@ class AudioPlayerManager(
     private fun parseDurationStringToMs(durationStr: String): Long {
         if (durationStr.isBlank()) return 0L
         return try {
-            val parts = durationStr.split(":").mapNotNull { it.trim().toLongOrNull() }
+            val parts = durationStr.split(":").map { it.trim().toInt() }
             when (parts.size) {
-                1 -> parts[0] * 1000L
-                2 -> (parts[0] * 60L + parts[1]) * 1000L
-                3 -> (parts[0] * 3600L + parts[1] * 60L + parts[2]) * 1000L
+                2 -> ((parts[0] * 60) + parts[1]) * 1000L
+                3 -> ((parts[0] * 3600) + (parts[1] * 60) + parts[2]) * 1000L
                 else -> 0L
             }
         } catch (e: Exception) {
@@ -377,8 +398,8 @@ class AudioPlayerManager(
     }
 
     fun release() {
-        streamResolveJob?.cancel()
         stopExoProgressTicker()
+        streamResolveJob?.cancel()
         player.release()
         webViewEngine.release()
         mediaSession?.release()

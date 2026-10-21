@@ -172,17 +172,19 @@ fun SearchScreen(
 
         // Шторка быстрого добавления в плейлист
         selectedTrackForPlaylist?.let { track ->
+            val containingPlaylistIds by viewModel.getPlaylistIdsForTrack(track.id).collectAsState(initial = emptyList())
+
             AddToPlaylistBottomSheet(
                 track = track,
                 playlists = playlists,
+                containingPlaylistIds = remember(containingPlaylistIds) { containingPlaylistIds.toSet() },
                 onDismiss = { selectedTrackForPlaylist = null },
                 onToggleTrackInPlaylist = { plId ->
                     viewModel.toggleTrackInPlaylist(plId, track)
                 },
                 onCreatePlaylistAndAdd = { name ->
                     viewModel.createPlaylistAndAddTrack(name, track)
-                },
-                isPlaylistContainsTrack = { false }
+                }
             )
         }
     }

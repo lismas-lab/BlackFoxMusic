@@ -1,5 +1,10 @@
 package com.blackfox.music.presentation.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,12 +39,13 @@ import com.blackfox.music.presentation.theme.*
 fun AddToPlaylistBottomSheet(
     track: Track,
     playlists: List<PlaylistEntity>,
+    containingPlaylistIds: Set<Long>,
     onDismiss: () -> Unit,
     onToggleTrackInPlaylist: (playlistId: Long) -> Unit,
-    onCreatePlaylistAndAdd: (name: String) -> Unit,
-    isPlaylistContainsTrack: (playlistId: Long) -> Boolean
+    onCreatePlaylistAndAdd: (name: String) -> Unit
 ) {
     var newPlaylistName by remember { mutableStateOf("") }
+    val userPlaylists = remember(playlists) { playlists.filter { !it.isFavoriteSystem } }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -63,14 +69,24 @@ fun AddToPlaylistBottomSheet(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp)
         ) {
-            Text(
-                text = "Добавить в плейлист",
-                color = TextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Добавить в плейлист",
+                    color = TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
 
-            Spacer(modifier = Modifier.height(4.dp))
+                TextButton(onClick = onDismiss) {
+                    Text("Готово", color = FoxOrange, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
 
             Text(
                 text = "${track.title} • ${track.artist}",
@@ -79,7 +95,7 @@ fun AddToPlaylistBottomSheet(
                 maxLines = 1
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Поле создания нового плейлиста "на лету"
             Row(
@@ -130,54 +146,72 @@ fun AddToPlaylistBottomSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Список существующих плейлистов
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(playlists) { pl ->
-                    val contains = isPlaylistContainsTrack(pl.playlistId)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .liquidGlass(
-                                cornerRadius = 14.dp,
-                                backgroundColor = if (contains) Color(0x2AFFFFFF) else Color(0x0EFFFFFF)
-                            )
-                            .clickable { onToggleTrackInPlaylist(pl.playlistId) }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = pl.name,
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        // Чекбокс индикатор
-                        Box(
+            if (userPlaylists.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "У вас пока нет плейлистов.\nВведите имя выше и нажмите +, чтобы создать!",
+                        color = TextMuted,
+                        fontSize = 13.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(userPlaylists, key = { it.playlistId }) { pl ->
+                        val contains = containingPlaylistIds.contains(pl.playlistId)
+                        Row(
                             modifier = Modifier
-                                .size(24.dp)
-                                .clip(RoundedCornerShape(7.dp))
-                                .background(if (contains) FoxOrange else Color.Transparent)
-                                .border(
-                                    width = 1.dp,
-                                    color = if (contains) FoxOrange else Color.White.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(7.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (contains) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Добавлено",
-                                    tint = ObsidianBlack,
-                                    modifier = Modifier.size(16.dp)
+                                .fillMaxWidth()
+                                .liquidGlass(
+                                    cornerRadius = 14.dp,
+                                    backgroundColor = if (contains) Color(0x28FFFFFF) else Color(0x0EFFFFFF),
+                                    borderColor = if (contains) FoxOrange.copy(alpha = 0.5f) else GlassBorder
                                 )
+                                .clickable { onToggleTrackInPlaylist(pl.playlistId) }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = pl.name,
+                                color = if (contains) FoxOrange else TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = if (contains) FontWeight.Bold else FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // Чекбокс индикатор
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(if (contains) FoxOrange else Color.Transparent)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = if (contains) FoxOrange else Color.White.copy(alpha = 0.35f),
+                                        shape = RoundedCornerShape(7.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (contains) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Добавлено",
+                                        tint = ObsidianBlack,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
