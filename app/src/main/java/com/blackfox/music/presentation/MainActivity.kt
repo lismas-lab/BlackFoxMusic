@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity() {
                             val sampleArtists = followedArtists.take(6)
                             for (artist in sampleArtists) {
                                 try {
-                                    val newTracks = repository.getArtistNewReleases(artist.channelId, artist.name)
+                                    val newTracks = repository.getArtistNewReleasesLastMonth(artist.channelId, artist.name)
                                     releases.addAll(newTracks.take(3))
                                 } catch (_: Exception) {}
                             }

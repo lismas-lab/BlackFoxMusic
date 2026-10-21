@@ -40,15 +40,18 @@ class YouTubeAudioWebView(private val context: Context) {
 
     private var currentVideoId: String? = null
     private var isApiReady = false
+    private var isSeeking = false
 
     private val progressRunnable = object : Runnable {
         override fun run() {
             if (_isPlaying.value && webView != null) {
-                webView?.evaluateJavascript("if (window.player && player.getCurrentTime) player.getCurrentTime();") { res ->
-                    val clean = res?.replace("\"", "")?.trim()
-                    val sec = clean?.toFloatOrNull() ?: 0f
-                    if (sec > 0f) {
-                        _currentPositionMs.value = (sec * 1000L).toLong()
+                if (!isSeeking) {
+                    webView?.evaluateJavascript("if (window.player && player.getCurrentTime) player.getCurrentTime();") { res ->
+                        val clean = res?.replace("\"", "")?.trim()
+                        val sec = clean?.toFloatOrNull() ?: 0f
+                        if (sec > 0f && !isSeeking) {
+                            _currentPositionMs.value = (sec * 1000L).toLong()
+                        }
                     }
                 }
                 webView?.evaluateJavascript("if (window.player && player.getDuration) player.getDuration();") { res ->
@@ -91,12 +94,13 @@ class YouTubeAudioWebView(private val context: Context) {
         return wv
     }
 
-    private fun loadPlayerHtml(videoId: String, autoPlay: Boolean = true) {
+    private fun loadPlayerHtml(videoId: String, autoPlay: Boolean = true, startSeconds: Float = 0f) {
         val wv = webView ?: return
         isApiReady = false
         _isLoading.value = true
 
         val autoplayInt = if (autoPlay) 1 else 0
+        val startSecInt = startSeconds.toInt().coerceAtLeast(0)
         val html = """
             <!DOCTYPE html>
             <html>
@@ -122,6 +126,7 @@ class YouTubeAudioWebView(private val context: Context) {
                                 'controls': 0,
                                 'playsinline': 1,
                                 'rel': 0,
+                                'start': $startSecInt,
                                 'enablejsapi': 1,
                                 'origin': 'https://music.youtube.com'
                             },
@@ -134,6 +139,9 @@ class YouTubeAudioWebView(private val context: Context) {
                     }
                     function onPlayerReady(event) {
                         AndroidBridge.onReady();
+                        if ($startSecInt > 0 && event.target.seekTo) {
+                            event.target.seekTo($startSecInt, true);
+                        }
                         if ($autoplayInt === 1) {
                             event.target.playVideo();
                         }
@@ -160,14 +168,26 @@ class YouTubeAudioWebView(private val context: Context) {
 
         mainHandler.post {
             val wv = webView
+            val sec = (startPositionMs / 1000f).coerceAtLeast(0f)
             if (wv != null && isApiReady) {
-                val sec = startPositionMs / 1000f
                 wv.evaluateJavascript(
-                    "if (window.player && player.loadVideoById) { player.loadVideoById('$videoId', $sec); player.playVideo(); }",
+                    """
+                    if (window.player) {
+                        if (player.loadVideoById) {
+                            player.loadVideoById({
+                                videoId: '$videoId',
+                                startSeconds: $sec
+                            });
+                        }
+                        if (player.playVideo) {
+                            player.playVideo();
+                        }
+                    }
+                    """.trimIndent(),
                     null
                 )
             } else {
-                loadPlayerHtml(videoId, autoPlay = true)
+                loadPlayerHtml(videoId, autoPlay = true, startSeconds = sec)
             }
         }
     }
@@ -203,10 +223,30 @@ class YouTubeAudioWebView(private val context: Context) {
 
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
-        val sec = positionMs / 1000f
+        val sec = (positionMs / 1000f).coerceAtLeast(0f)
+        isSeeking = true
+        _isPlaying.value = true
+        startProgress()
+
         mainHandler.post {
-            webView?.evaluateJavascript("if (window.player && player.seekTo) player.seekTo($sec, true);", null)
+            webView?.evaluateJavascript(
+                """
+                if (window.player) {
+                    if (player.seekTo) {
+                        player.seekTo($sec, true);
+                    }
+                    if (player.playVideo) {
+                        player.playVideo();
+                    }
+                }
+                """.trimIndent(),
+                null
+            )
         }
+
+        mainHandler.postDelayed({
+            isSeeking = false
+        }, 1500)
     }
 
     private fun startProgress() {
@@ -232,26 +272,35 @@ class YouTubeAudioWebView(private val context: Context) {
             mainHandler.post {
                 when (state) {
                     1 -> { // YT.PlayerState.PLAYING
+                        isSeeking = false
                         _isPlaying.value = true
                         _isLoading.value = false
                         startProgress()
                         Log.i(tag, "Состояние: PLAYING")
                     }
                     2 -> { // YT.PlayerState.PAUSED
-                        _isPlaying.value = false
-                        _isLoading.value = false
-                        stopProgress()
-                        Log.i(tag, "Состояние: PAUSED")
+                        if (!isSeeking) {
+                            _isPlaying.value = false
+                            _isLoading.value = false
+                            stopProgress()
+                            Log.i(tag, "Состояние: PAUSED")
+                        } else {
+                            mainHandler.post {
+                                webView?.evaluateJavascript("if (window.player && player.playVideo) player.playVideo();", null)
+                            }
+                        }
                     }
                     3 -> { // YT.PlayerState.BUFFERING
                         _isLoading.value = true
                     }
                     0 -> { // YT.PlayerState.ENDED
-                        _isPlaying.value = false
-                        _isLoading.value = false
-                        _currentPositionMs.value = 0L
-                        stopProgress()
-                        Log.i(tag, "Состояние: ENDED")
+                        if (!isSeeking) {
+                            _isPlaying.value = false
+                            _isLoading.value = false
+                            _currentPositionMs.value = 0L
+                            stopProgress()
+                            Log.i(tag, "Состояние: ENDED")
+                        }
                     }
                     else -> {}
                 }

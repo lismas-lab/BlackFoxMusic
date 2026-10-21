@@ -70,13 +70,6 @@ object AudioStreamResolver {
             e.printStackTrace()
         }
 
-        // 3. Fallback через открытый шлюз аудио
-        try {
-            return@withContext "https://inv.nadeko.net/latest_version?id=$videoId&itag=140"
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
         null
     }
 

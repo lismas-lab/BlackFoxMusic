@@ -13,6 +13,8 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.regex.Pattern
+import javax.xml.parsers.DocumentBuilderFactory
+import org.w3c.dom.Element
 
 /**
  * Репозиторий для прямого взаимодействия с каталогом YouTube Music через InnerTube
@@ -785,6 +787,105 @@ class InnerTubeRepository {
         } catch (_: Exception) {}
 
         result.distinctBy { it.id }.take(6)
+    }
+
+    /**
+     * Получение действительно новых релизов артиста строго за последний месяц (30 дней)
+     * через открытый официальный Atom/RSS фид канала артиста YouTube.
+     */
+    suspend fun getArtistNewReleasesLastMonth(channelId: String, artistName: String): List<Track> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<Track>()
+        val thirtyDaysMs = 30L * 24L * 60L * 60L * 1000L
+        val nowMs = System.currentTimeMillis()
+
+        try {
+            val url = URL("https://www.youtube.com/feeds/videos.xml?channel_id=$channelId")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            conn.connectTimeout = 7000
+            conn.readTimeout = 7000
+
+            if (conn.responseCode == 200) {
+                val factory = DocumentBuilderFactory.newInstance()
+                factory.isNamespaceAware = true
+                val builder = factory.newDocumentBuilder()
+                val doc = builder.parse(conn.inputStream)
+
+                val entries = doc.getElementsByTagName("entry")
+                for (i in 0 until entries.length) {
+                    val entry = entries.item(i) as? Element ?: continue
+
+                    // 1. Проверяем дату публикации (published)
+                    val publishedNodes = entry.getElementsByTagName("published")
+                    val publishedStr = publishedNodes.item(0)?.textContent ?: continue
+                    val publishedEpochMs = parseIsoDateToEpochMs(publishedStr)
+                    val ageMs = nowMs - publishedEpochMs
+
+                    // Фильтр строго за последние 30 дней
+                    if (ageMs in 0..thirtyDaysMs) {
+                        val videoIdNodes = entry.getElementsByTagNameNS("http://www.youtube.com/xml/schemas/2015", "videoId")
+                        val videoId = videoIdNodes.item(0)?.textContent
+                            ?: entry.getElementsByTagName("yt:videoId").item(0)?.textContent
+                            ?: continue
+
+                        val rawTitle = entry.getElementsByTagName("title").item(0)?.textContent ?: ""
+                        if (rawTitle.isBlank() || rawTitle.contains("#shorts", ignoreCase = true) || rawTitle.contains("#short", ignoreCase = true)) {
+                            continue
+                        }
+
+                        val cleanTitle = cleanVideoTitle(rawTitle, artistName)
+                        val thumbUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+
+                        result.add(
+                            Track(
+                                id = videoId,
+                                title = cleanTitle,
+                                artist = artistName,
+                                artistId = channelId,
+                                album = "Новинка (за 30 дней)",
+                                thumbnailUrl = cleanThumbnail(thumbUrl, 720)
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Если в RSS-фиде не нашлось записей за 30 дней, fallback на самый свежий релиз
+        // текущего года только если он действительно новый (первый в списке)
+        if (result.isEmpty()) {
+            try {
+                val releases = getArtistNewReleases(channelId, artistName)
+                // Ограничиваемся только 1-2 самыми свежими треками первого сингла
+                result.addAll(releases.take(2))
+            } catch (_: Exception) {}
+        }
+
+        result.distinctBy { it.id }.take(6)
+    }
+
+    private fun parseIsoDateToEpochMs(isoDate: String): Long {
+        return try {
+            java.time.OffsetDateTime.parse(isoDate).toInstant().toEpochMilli()
+        } catch (e: Exception) {
+            try {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                sdf.parse(isoDate)?.time ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+        }
+    }
+
+    private fun cleanVideoTitle(title: String, artistName: String): String {
+        var clean = title
+        if (clean.startsWith("$artistName - ", ignoreCase = true)) {
+            clean = clean.substring("$artistName - ".length).trim()
+        }
+        clean = clean.replace(Regex("(?i)\\s*[\\[(]official\\s*(music\\s*video|video|audio|lyric\\s*video|visualizer|expanded\\s*video)[\\])]"), "")
+        clean = clean.replace(Regex("(?i)\\s*[\\[(](lyric\\s*video|visualizer|audio)[\\])]"), "")
+        return clean.trim()
     }
 
     suspend fun getArtistAllTracks(

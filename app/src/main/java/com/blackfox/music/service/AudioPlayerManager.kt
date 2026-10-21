@@ -17,7 +17,10 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionResult
 import coil.imageLoader
@@ -45,7 +48,20 @@ class AudioPlayerManager(
     internal var activeEngine = PlaybackEngine.NONE
 
     // 1. Центральный движок ExoPlayer с аудиофокусом, Wakelock и фоновым воспроизведением
+    @OptIn(UnstableApi::class)
+    private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .setConnectTimeoutMs(15000)
+        .setReadTimeoutMs(20000)
+        .setAllowCrossProtocolRedirects(true)
+
+    @OptIn(UnstableApi::class)
+    private val mediaSourceFactory = DefaultMediaSourceFactory(context)
+        .setDataSourceFactory(DefaultDataSource.Factory(context, httpDataSourceFactory))
+
+    @OptIn(UnstableApi::class)
     val player: ExoPlayer = ExoPlayer.Builder(context)
+        .setMediaSourceFactory(mediaSourceFactory)
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -115,13 +131,14 @@ class AudioPlayerManager(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                // Если ExoPlayer не смог проиграть поток, бесшовно переключаемся на WebView fallback
+                // Если ExoPlayer не смог проиграть поток, бесшовно переключаемся на WebView fallback с сохранением позиции
                 if (activeEngine == PlaybackEngine.EXOPLAYER) {
+                    val savedPositionMs = _currentPositionMs.value
                     activeEngine = PlaybackEngine.WEBVIEW
                     player.stop()
                     player.clearMediaItems()
                     _currentTrack.value?.let { tr ->
-                        webViewEngine.playTrack(tr.id)
+                        webViewEngine.playTrack(tr.id, startPositionMs = savedPositionMs)
                     }
                 }
             }
@@ -387,7 +404,12 @@ class AudioPlayerManager(
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
         when (activeEngine) {
-            PlaybackEngine.EXOPLAYER -> player.seekTo(positionMs)
+            PlaybackEngine.EXOPLAYER -> {
+                player.seekTo(positionMs)
+                if (!player.isPlaying && player.playbackState != Player.STATE_ENDED) {
+                    player.play()
+                }
+            }
             PlaybackEngine.WEBVIEW -> webViewEngine.seekTo(positionMs)
             PlaybackEngine.NONE -> Unit
         }
