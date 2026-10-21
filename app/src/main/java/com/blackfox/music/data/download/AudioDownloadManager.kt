@@ -2,6 +2,7 @@ package com.blackfox.music.data.download
 
 import android.content.Context
 import android.os.Environment
+import android.os.PowerManager
 import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.AudioStreamResolver
@@ -35,8 +36,11 @@ class AudioDownloadManager(
     @Volatile private var currentDownloadingTrackId: String? = null
     @Volatile private var currentDownloadingJob: Job? = null
 
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    private val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackFox:AudioDownloadManager")
+
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
@@ -63,6 +67,12 @@ class AudioDownloadManager(
                     continue
                 }
 
+                try {
+                    if (wakeLock?.isHeld == false) {
+                        wakeLock.acquire(15 * 60 * 1000L)
+                    }
+                } catch (e: Exception) {}
+
                 currentDownloadingTrackId = track.id
                 val job = launch {
                     processTrackDownload(track)
@@ -72,6 +82,14 @@ class AudioDownloadManager(
                 currentDownloadingJob = null
                 currentDownloadingTrackId = null
                 activeOrQueuedTrackIds.remove(track.id)
+
+                if (activeOrQueuedTrackIds.isEmpty()) {
+                    try {
+                        if (wakeLock?.isHeld == true) {
+                            wakeLock.release()
+                        }
+                    } catch (e: Exception) {}
+                }
             }
         }
     }
@@ -81,15 +99,16 @@ class AudioDownloadManager(
      */
     fun downloadTrack(track: Track) {
         if (activeOrQueuedTrackIds.contains(track.id)) return
+        activeOrQueuedTrackIds.add(track.id)
 
         scope.launch {
             val existing = musicDao.getTrackById(track.id)
             if (existing?.isDownloaded == true && existing.localFilePath != null && File(existing.localFilePath).exists()) {
+                activeOrQueuedTrackIds.remove(track.id)
                 updateProgress(track.id, DownloadProgress(track.id, 100, 0, 0, DownloadStatus.COMPLETED))
                 return@launch
             }
 
-            activeOrQueuedTrackIds.add(track.id)
             updateProgress(
                 track.id,
                 DownloadProgress(track.id, 0, 0, 0, DownloadStatus.DOWNLOADING, "В очереди...")
@@ -106,13 +125,13 @@ class AudioDownloadManager(
             // 1. Получаем прямую ссылку на аудиопоток (с повторной попыткой при необходимости)
             var directStreamUrl: String? = null
             var attempts = 0
-            while (directStreamUrl.isNullOrBlank() && attempts < 2) {
+            while (directStreamUrl.isNullOrBlank() && attempts < 3) {
                 attempts++
                 directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id) { prepPercent ->
                     updateProgress(track.id, DownloadProgress(track.id, prepPercent, 0, 0, DownloadStatus.DOWNLOADING))
                 }
-                if (directStreamUrl.isNullOrBlank() && attempts < 2) {
-                    delay(1500)
+                if (directStreamUrl.isNullOrBlank() && attempts < 3) {
+                    delay(2000)
                 }
             }
 
@@ -145,11 +164,23 @@ class AudioDownloadManager(
 
             if (tempFile.exists()) tempFile.delete()
 
-            val totalBytes = downloadFileWithProgress(directStreamUrl, tempFile) { percent, downloaded, total ->
-                updateProgress(
-                    track.id,
-                    DownloadProgress(track.id, percent, downloaded, total, DownloadStatus.DOWNLOADING)
-                )
+            var totalBytes = 0L
+            var downloadAttempts = 0
+            var downloadSuccess = false
+            while (!downloadSuccess && downloadAttempts < 2) {
+                downloadAttempts++
+                try {
+                    totalBytes = downloadFileWithProgress(directStreamUrl, tempFile) { percent, downloaded, total ->
+                        updateProgress(
+                            track.id,
+                            DownloadProgress(track.id, percent, downloaded, total, DownloadStatus.DOWNLOADING)
+                        )
+                    }
+                    downloadSuccess = true
+                } catch (e: Exception) {
+                    if (downloadAttempts >= 2) throw e
+                    delay(1500)
+                }
             }
 
             // Атомарно переименовываем в финальный файл

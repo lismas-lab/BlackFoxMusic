@@ -50,6 +50,13 @@ interface MusicDao {
     @Query("UPDATE tracks SET favoriteOrderPosition = :order WHERE id = :trackId")
     suspend fun updateFavoriteOrder(trackId: String, order: Int)
 
+    @Transaction
+    suspend fun updateFavoritesOrder(trackIdsInOrder: List<String>) {
+        trackIdsInOrder.forEachIndexed { index, trackId ->
+            updateFavoriteOrder(trackId, index)
+        }
+    }
+
     @Query("SELECT MAX(favoriteOrderPosition) FROM tracks WHERE isFavorite = 1")
     suspend fun getMaxFavoriteOrder(): Int?
 

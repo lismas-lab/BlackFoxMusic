@@ -1,5 +1,7 @@
 package com.blackfox.music.presentation.screens.mymusic
 
+import com.blackfox.music.data.local.LocalAccentTheme
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,8 +44,11 @@ fun MyMusicScreen(
     userPlaylists: List<PlaylistWithTracks>,
     favoriteTracks: List<TrackEntity>,
     uploadedTracksCount: Int = 0,
+    downloadedTracksCount: Int = 0,
     onOpenFavorites: () -> Unit,
     onPlayFavorites: () -> Unit,
+    onOpenDownloaded: () -> Unit = {},
+    onPlayDownloaded: () -> Unit = {},
     onOpenUploaded: () -> Unit = {},
     onPlayUploaded: () -> Unit = {},
     onOpenPlaylist: (Long) -> Unit,
@@ -207,7 +212,84 @@ fun MyMusicScreen(
                     }
                 }
 
-                // Закрепленная карточка "Загруженные треки" (Собственные аудиофайлы пользователя)
+                                // Закрепленная карточка "Скачанные треки" (Оффлайн)
+                item(span = { GridItemSpan(2) }) {
+                    val accent = LocalAccentTheme.current.primary
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .liquidGlass(
+                                cornerRadius = 22.dp,
+                                backgroundColor = Color(0x18FFFFFF),
+                                borderBrush = Brush.linearGradient(
+                                    listOf(accent.copy(alpha = 0.5f), Color.Transparent)
+                                )
+                            )
+                            .clickable { onOpenDownloaded() }
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(accent.copy(alpha = 0.4f), Color(0x16FFFFFF))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DownloadDone,
+                                    contentDescription = "Скачанные",
+                                    tint = accent,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Скачанные треки",
+                                    color = TextPrimary,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${downloadedTracksCount} треков • Оффлайн",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
+
+                            if (downloadedTracksCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(accent)
+                                        .clickable { onPlayDownloaded() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Воспроизвести всё",
+                                        tint = ObsidianBlack,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+// Закрепленная карточка "Загруженные треки" (Собственные аудиофайлы пользователя)
                 item(span = { GridItemSpan(2) }) {
                     Box(
                         modifier = Modifier

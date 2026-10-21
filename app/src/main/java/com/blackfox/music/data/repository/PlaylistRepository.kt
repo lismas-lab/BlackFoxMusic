@@ -106,6 +106,46 @@ class PlaylistRepository(
         musicDao.updatePlaylistTracksOrder(playlistId, trackIds)
     }
 
+    suspend fun updateFavoritesOrder(trackIds: List<String>) = withContext(Dispatchers.IO) {
+        musicDao.updateFavoritesOrder(trackIds)
+    }
+
+    suspend fun toggleFavorite(track: Track): Boolean = withContext(Dispatchers.IO) {
+        val existing = musicDao.getTrackById(track.id)
+        val newFav = !(existing?.isFavorite ?: false)
+        if (newFav) {
+            val maxPos = musicDao.getMaxFavoriteOrder() ?: -1
+            if (existing == null) {
+                musicDao.insertTrack(
+                    TrackEntity(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        album = track.album,
+                        duration = track.duration,
+                        thumbnailUrl = track.thumbnailUrl,
+                        isFavorite = true,
+                        favoriteOrderPosition = maxPos + 1
+                    )
+                )
+            } else {
+                musicDao.updateFavorite(track.id, true)
+                musicDao.updateFavoriteOrder(track.id, maxPos + 1)
+            }
+            downloadManager.downloadTrack(track)
+        } else {
+            musicDao.updateFavorite(track.id, false)
+            // Если трека больше нет ни в одном плейлисте и он не загружен пользователем -> удаляем с устройства
+            val inAnyPlaylist = musicDao.countPlaylistsContainingTrack(track.id, excludePlaylistId = -1) > 0
+            val isUploaded = existing?.isUserUploaded == true
+            if (!inAnyPlaylist && !isUploaded) {
+                downloadManager.deleteDownloadedTrack(track.id)
+                musicDao.deleteTrack(track.id)
+            }
+        }
+        newFav
+    }
+
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String) = withContext(Dispatchers.IO) {
         musicDao.removeTrack(playlistId, trackId)
 
@@ -113,8 +153,9 @@ class PlaylistRepository(
         val inOtherPlaylists = musicDao.countPlaylistsContainingTrack(trackId, excludePlaylistId = playlistId) > 0
         val trackEntity = musicDao.getTrackById(trackId)
         val isFavorite = trackEntity?.isFavorite == true
+        val isUploaded = trackEntity?.isUserUploaded == true
 
-        if (!inOtherPlaylists && !isFavorite) {
+        if (!inOtherPlaylists && !isFavorite && !isUploaded) {
             // Трек не используется в других плейлистах и не в избранном -> очищаем файлы и запись
             downloadManager.deleteDownloadedTrack(trackId)
             musicDao.deleteTrack(trackId)
@@ -133,8 +174,9 @@ class PlaylistRepository(
             val inOtherPlaylists = musicDao.countPlaylistsContainingTrack(trackId, excludePlaylistId = playlistId) > 0
             val trackEntity = musicDao.getTrackById(trackId)
             val isFavorite = trackEntity?.isFavorite == true
+            val isUploaded = trackEntity?.isUserUploaded == true
 
-            if (!inOtherPlaylists && !isFavorite) {
+            if (!inOtherPlaylists && !isFavorite && !isUploaded) {
                 downloadManager.deleteDownloadedTrack(trackId)
                 musicDao.deleteTrack(trackId)
             }

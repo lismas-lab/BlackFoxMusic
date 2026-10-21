@@ -58,9 +58,15 @@ fun PlaylistDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val pl = playlist
-    var localTracks by remember(tracks) { mutableStateOf(tracks) }
-    var draggingIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffsetY by remember { mutableStateOf(0f) }
+    var localTracks by remember { mutableStateOf(tracks) }
+    var draggingTrackId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(tracks) {
+        if (draggingTrackId == null) {
+            localTracks = tracks
+        }
+    }
 
     val coverModel = remember(pl.customCoverUri, tracks) {
         when {
@@ -336,7 +342,7 @@ fun PlaylistDetailScreen(
                     )
                     val isFav = favoriteTrackIds.contains(entity.id)
                     val progress = downloadProgressMap[entity.id]
-                    val isDragging = draggingIndex == index
+                    val isDragging = entity.id == draggingTrackId
 
                     TrackListItem(
                         track = domainTrack,
@@ -353,32 +359,40 @@ fun PlaylistDetailScreen(
                         reorderHandleModifier = Modifier.pointerInput(entity.id) {
                             detectDragGestures(
                                 onDragStart = {
-                                    draggingIndex = index
+                                    draggingTrackId = entity.id
                                     dragOffsetY = 0f
                                 },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
                                     dragOffsetY += dragAmount.y
                                     val itemHeightPx = 68.dp.toPx()
-                                    val fromIdx = draggingIndex ?: return@detectDragGestures
-                                    val steps = (dragOffsetY / itemHeightPx).toInt()
-                                    val targetIdx = (fromIdx + steps).coerceIn(0, localTracks.lastIndex)
-                                    if (targetIdx != fromIdx) {
-                                        val updated = localTracks.toMutableList().apply {
-                                            add(targetIdx, removeAt(fromIdx))
+                                    val currentIdx = localTracks.indexOfFirst { it.id == entity.id }
+                                    if (currentIdx != -1) {
+                                        if (dragOffsetY > itemHeightPx && currentIdx < localTracks.lastIndex) {
+                                            val nextIdx = currentIdx + 1
+                                            val updated = localTracks.toMutableList().apply {
+                                                add(nextIdx, removeAt(currentIdx))
+                                            }
+                                            localTracks = updated
+                                            dragOffsetY -= itemHeightPx
+                                        } else if (dragOffsetY < -itemHeightPx && currentIdx > 0) {
+                                            val prevIdx = currentIdx - 1
+                                            val updated = localTracks.toMutableList().apply {
+                                                add(prevIdx, removeAt(currentIdx))
+                                            }
+                                            localTracks = updated
+                                            dragOffsetY += itemHeightPx
                                         }
-                                        localTracks = updated
-                                        draggingIndex = targetIdx
-                                        dragOffsetY -= (targetIdx - fromIdx) * itemHeightPx
                                     }
                                 },
                                 onDragEnd = {
-                                    draggingIndex = null
+                                    val finalOrder = localTracks.map { it.id }
+                                    draggingTrackId = null
                                     dragOffsetY = 0f
-                                    onReorderTracks(localTracks.map { it.id })
+                                    onReorderTracks(finalOrder)
                                 },
                                 onDragCancel = {
-                                    draggingIndex = null
+                                    draggingTrackId = null
                                     dragOffsetY = 0f
                                 }
                             )
@@ -387,8 +401,8 @@ fun PlaylistDetailScreen(
                             .zIndex(if (isDragging) 10f else 1f)
                             .graphicsLayer {
                                 translationY = if (isDragging) dragOffsetY else 0f
-                                scaleX = if (isDragging) 1.02f else 1f
-                                scaleY = if (isDragging) 1.02f else 1f
+                                scaleX = if (isDragging) 1.03f else 1f
+                                scaleY = if (isDragging) 1.03f else 1f
                                 shadowElevation = if (isDragging) 16f else 0f
                             }
                     )

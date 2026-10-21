@@ -46,6 +46,7 @@ import com.blackfox.music.presentation.screens.album.AlbumViewModel
 import com.blackfox.music.presentation.screens.artist.ArtistScreen
 import com.blackfox.music.presentation.screens.artist.ArtistViewModel
 import com.blackfox.music.presentation.screens.home.HomeScreen
+import com.blackfox.music.presentation.screens.mymusic.DownloadedTracksScreen
 import com.blackfox.music.presentation.screens.mymusic.FavoritesDetailScreen
 import com.blackfox.music.presentation.screens.mymusic.MyMusicScreen
 import com.blackfox.music.presentation.screens.mymusic.PlaylistDetailScreen
@@ -60,6 +61,17 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+fun TrackEntity.toDomain(): Track = Track(
+    id = id,
+    title = title,
+    artist = artist,
+    album = album,
+    duration = duration,
+    thumbnailUrl = thumbnailUrl,
+    isDownloaded = isDownloaded,
+    localFilePath = localFilePath
+)
 
 enum class MainTab(val title: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
@@ -112,6 +124,7 @@ class MainActivity : ComponentActivity() {
                 var selectedArtistName by remember { mutableStateOf<String?>(null) }
                 var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
                 var isFavoritesOpen by remember { mutableStateOf(false) }
+                var isDownloadedOpen by remember { mutableStateOf(false) }
                 var isUploadedOpen by remember { mutableStateOf(false) }
                 var isFullPlayerVisible by remember { mutableStateOf(false) }
                 var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
@@ -120,7 +133,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(
                     enabled = isFullPlayerVisible || selectedAlbumBrowseId != null ||
                             selectedArtistId != null || selectedArtistName != null ||
-                            selectedPlaylistId != null || isFavoritesOpen || isUploadedOpen || currentTab != MainTab.HOME
+                            selectedPlaylistId != null || isFavoritesOpen || isDownloadedOpen || isUploadedOpen || currentTab != MainTab.HOME
                 ) {
                     when {
                         isFullPlayerVisible -> isFullPlayerVisible = false
@@ -131,6 +144,7 @@ class MainActivity : ComponentActivity() {
                         }
                         selectedPlaylistId != null -> selectedPlaylistId = null
                         isFavoritesOpen -> isFavoritesOpen = false
+                        isDownloadedOpen -> isDownloadedOpen = false
                         isUploadedOpen -> isUploadedOpen = false
                         currentTab != MainTab.HOME -> currentTab = MainTab.HOME
                     }
@@ -148,6 +162,7 @@ class MainActivity : ComponentActivity() {
                 // Данные из базы Room
                 val userPlaylists by playlistRepository.getAllUserPlaylists().collectAsState(initial = emptyList())
                 val favoriteTracks by musicDao.getFavoriteTracks().collectAsState(initial = emptyList())
+                val downloadedTracks by musicDao.getDownloadedTracks().collectAsState(initial = emptyList())
                 val favoriteTrackIds by musicDao.getFavoriteTrackIds().collectAsState(initial = emptyList())
                 val userUploadedTracks by musicDao.getUserUploadedTracks().collectAsState(initial = emptyList())
                 val downloadedCount by musicDao.getDownloadedCount().collectAsState(initial = 0)
@@ -187,40 +202,17 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // Функция добавления/удаления из Любимого с автоматическим скачиванием
+                // Функция добавления/удаления из Любимого с автоматическим скачиванием и удалением файлов
                 fun toggleFavorite(track: Track) {
                     coroutineScope.launch {
-                        val isFav = favoriteSet.contains(track.id)
-                        val newFav = !isFav
-                        val existing = musicDao.getTrackById(track.id)
-                        if (existing == null) {
-                            musicDao.insertTrack(
-                                TrackEntity(
-                                    id = track.id,
-                                    title = track.title,
-                                    artist = track.artist,
-                                    album = track.album,
-                                    duration = track.duration,
-                                    thumbnailUrl = track.thumbnailUrl,
-                                    isFavorite = newFav
-                                )
-                            )
-                        } else {
-                            musicDao.updateFavorite(track.id, newFav)
-                        }
-                        if (newFav) {
-                            // Автоматически скачиваем трек при добавлении в любимое
-                            downloadManager.downloadTrack(track)
-                        }
+                        playlistRepository.toggleFavorite(track)
                     }
                 }
 
-                // Сохранение порядка избранного после перетаскивания
+                // Сохранение порядка избранного после перетаскивания в транзакции
                 fun reorderFavorites(orderedIds: List<String>) {
                     coroutineScope.launch {
-                        orderedIds.forEachIndexed { index, trackId ->
-                            musicDao.updateFavoriteOrder(trackId, index)
-                        }
+                        playlistRepository.updateFavoritesOrder(orderedIds)
                     }
                 }
 
@@ -551,6 +543,49 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // Экран Скачанных треков (Оффлайн)
+                        isDownloadedOpen -> {
+                            DownloadedTracksScreen(
+                                downloadedTracks = downloadedTracks,
+                                storageSizeBytes = storageSizeBytes,
+                                downloadProgressMap = downloadProgressMap,
+                                favoriteTrackIds = favoriteSet,
+                                onBackClick = { isDownloadedOpen = false },
+                                onTrackClick = { track ->
+                                    val domainList = downloadedTracks.map { it.toDomain() }
+                                    playTrackInQueue(track, domainList)
+                                },
+                                onPlayAll = {
+                                    if (downloadedTracks.isNotEmpty()) {
+                                        val domainList = downloadedTracks.map { it.toDomain() }
+                                        playTrackInQueue(domainList.first(), domainList)
+                                    }
+                                },
+                                onShuffle = {
+                                    if (downloadedTracks.isNotEmpty()) {
+                                        val domainList = downloadedTracks.map { it.toDomain() }.shuffled()
+                                        playTrackInQueue(domainList.first(), domainList)
+                                    }
+                                },
+                                onToggleFavorite = { track -> toggleFavorite(track) },
+                                onAddToPlaylistClick = { track -> trackForPlaylistSheet = track },
+                                onDeleteTrack = { trackId ->
+                                    coroutineScope.launch {
+                                        downloadManager.deleteDownloadedTrack(trackId)
+                                        val inAnyPlaylist = musicDao.countPlaylistsContainingTrack(trackId, excludePlaylistId = -1) > 0
+                                        val trackEntity = musicDao.getTrackById(trackId)
+                                        val isFav = trackEntity?.isFavorite == true
+                                        val isUploaded = trackEntity?.isUserUploaded == true
+                                        if (!inAnyPlaylist && !isFav && !isUploaded) {
+                                            musicDao.deleteTrack(trackId)
+                                        }
+                                    }
+                                },
+                                currentTrack = currentTrack,
+                                isPlaying = isPlaying
+                            )
+                        }
+
                         // Экран детального просмотра Любимого
                         isFavoritesOpen -> {
                             FavoritesDetailScreen(
@@ -640,8 +675,16 @@ class MainActivity : ComponentActivity() {
                                         userPlaylists = userPlaylists,
                                         favoriteTracks = favoriteTracks,
                                         uploadedTracksCount = userUploadedTracks.size,
+                                        downloadedTracksCount = downloadedCount,
                                         onOpenFavorites = { isFavoritesOpen = true },
                                         onPlayFavorites = { playFavorites(shuffle = false) },
+                                        onOpenDownloaded = { isDownloadedOpen = true },
+                                        onPlayDownloaded = {
+                                            if (downloadedTracks.isNotEmpty()) {
+                                                val domainList = downloadedTracks.map { it.toDomain() }
+                                                playTrackInQueue(domainList.first(), domainList)
+                                            }
+                                        },
                                         onOpenUploaded = { isUploadedOpen = true },
                                         onPlayUploaded = { playUploaded(shuffle = false) },
                                         onOpenPlaylist = { plId -> selectedPlaylistId = plId },
@@ -728,6 +771,7 @@ class MainActivity : ComponentActivity() {
                                         selectedArtistName == null &&
                                         selectedPlaylistId == null &&
                                         !isFavoritesOpen &&
+                                        !isDownloadedOpen &&
                                         !isUploadedOpen
 
                                 Column(
@@ -743,6 +787,7 @@ class MainActivity : ComponentActivity() {
                                             selectedArtistName = null
                                             selectedPlaylistId = null
                                             isFavoritesOpen = false
+                                            isDownloadedOpen = false
                                             isUploadedOpen = false
                                             currentTab = tab
                                         }

@@ -67,27 +67,7 @@ class AlbumViewModel(
 
     fun toggleFavorite(track: Track) {
         viewModelScope.launch {
-            val isFav = favoriteTrackIds.value.contains(track.id)
-            val newFav = !isFav
-            val existing = musicDao.getTrackById(track.id)
-            if (existing == null) {
-                musicDao.insertTrack(
-                    TrackEntity(
-                        id = track.id,
-                        title = track.title,
-                        artist = track.artist,
-                        album = track.album,
-                        duration = track.duration,
-                        thumbnailUrl = track.thumbnailUrl,
-                        isFavorite = newFav
-                    )
-                )
-            } else {
-                musicDao.updateFavorite(track.id, newFav)
-            }
-            if (newFav) {
-                downloadManager.downloadTrack(track)
-            }
+            playlistRepository.toggleFavorite(track)
         }
     }
 

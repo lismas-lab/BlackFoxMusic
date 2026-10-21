@@ -35,7 +35,8 @@ data class Artist(
     val topTracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
     val similarArtists: List<Artist> = emptyList(),
-    val allSongsBrowseId: String? = null
+    val allSongsBrowseId: String? = null,
+    val allSongsParams: String? = null
 )
 
 data class Playlist(

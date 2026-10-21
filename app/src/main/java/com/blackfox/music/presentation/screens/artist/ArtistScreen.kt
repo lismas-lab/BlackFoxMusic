@@ -1,5 +1,7 @@
 package com.blackfox.music.presentation.screens.artist
 
+import com.blackfox.music.data.local.LocalAccentTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -401,8 +403,13 @@ fun ArtistScreen(
                                             fontSize = 18.sp,
                                             fontWeight = FontWeight.Bold
                                         )
+                                        val countText = when {
+                                            !totalSongsCount.isNullOrBlank() -> totalSongsCount!!
+                                            !allTracksContinuationToken.isNullOrBlank() -> "${activeTracks.size}+ треков"
+                                            else -> "${activeTracks.size} треков"
+                                        }
                                         Text(
-                                            text = "${activeTracks.size} треков",
+                                            text = countText,
                                             color = TextSecondary,
                                             fontSize = 13.sp
                                         )
@@ -459,7 +466,7 @@ fun ArtistScreen(
                                     )
                                 }
 
-                                if (!allTracksContinuationToken.isNullOrBlank()) {
+                                if (!allTracksContinuationToken.isNullOrBlank() || activeTracks.size >= 50) {
                                     item {
                                         Box(
                                             modifier = Modifier
@@ -469,7 +476,7 @@ fun ArtistScreen(
                                         ) {
                                             if (isLoadingMoreTracks) {
                                                 CircularProgressIndicator(
-                                                    color = FoxOrange,
+                                                    color = LocalAccentTheme.current.primary,
                                                     modifier = Modifier.size(28.dp),
                                                     strokeWidth = 2.5.dp
                                                 )

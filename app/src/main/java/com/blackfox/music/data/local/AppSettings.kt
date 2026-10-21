@@ -20,6 +20,8 @@ enum class AccentTheme(
     ACID_LIME("acid_lime", "Acid Lime", "⚡", Color(0xFF76FF03), Color(0xFFA2FF54)),
     MONOCHROME("monochrome", "Monochrome Glass", "🤍", Color(0xFFF5F5F7), Color(0xFFFFFFFF));
 
+    val primary: Color get() = color
+
     companion object {
         fun fromKey(key: String): AccentTheme = entries.find { it.key == key } ?: FOX_ORANGE
     }

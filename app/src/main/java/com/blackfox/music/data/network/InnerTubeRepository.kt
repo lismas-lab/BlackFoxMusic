@@ -480,6 +480,7 @@ class InnerTubeRepository {
         var subscribers = ""
         var avatarUrl = ""
         var allSongsBrowseId: String? = null
+        var allSongsParams: String? = null
         val topTracks = mutableListOf<Track>()
         val albums = mutableListOf<Album>()
         val similarArtists = mutableListOf<Artist>()
@@ -518,15 +519,15 @@ class InnerTubeRepository {
 
             // 1. Популярные треки (Top songs)
             if (shelf != null && topTracks.isEmpty()) {
-                allSongsBrowseId = shelf.optJSONObject("bottomEndpoint")
-                    ?.optJSONObject("browseEndpoint")
-                    ?.optString("browseId")
-                    ?: shelf.optJSONObject("title")
-                        ?.optJSONArray("runs")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("navigationEndpoint")
-                        ?.optJSONObject("browseEndpoint")
-                        ?.optString("browseId")
+                val ep = shelf.optJSONObject("bottomEndpoint")?.optJSONObject("browseEndpoint")
+                    ?: shelf.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
+                    ?: shelf.optJSONObject("header")?.optJSONObject("musicHeaderRenderer")?.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
+                    ?: shelf.optJSONObject("header")?.optJSONObject("musicCarouselShelfBasicHeaderRenderer")?.optJSONObject("moreContentButton")?.optJSONObject("buttonRenderer")?.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
+
+                if (ep != null) {
+                    allSongsBrowseId = ep.optString("browseId")
+                    allSongsParams = ep.optString("params").takeIf { it.isNotBlank() }
+                }
 
                 val items = shelf.optJSONArray("contents") ?: JSONArray()
                 for (j in 0 until items.length()) {
@@ -700,51 +701,90 @@ class InnerTubeRepository {
             topTracks = topTracks,
             albums = albums,
             similarArtists = similarArtists,
-            allSongsBrowseId = allSongsBrowseId
+            allSongsBrowseId = allSongsBrowseId,
+            allSongsParams = allSongsParams
         )
     }
 
-    suspend fun getArtistAllTracks(allSongsBrowseId: String, artistName: String, artistId: String): ArtistTracksPage = withContext(Dispatchers.IO) {
+    suspend fun getArtistAllTracks(
+        allSongsBrowseId: String,
+        allSongsParams: String? = null,
+        artistName: String,
+        artistId: String
+    ): ArtistTracksPage = withContext(Dispatchers.IO) {
         if (allSongsBrowseId.isNotBlank()) {
             try {
                 val payload = JSONObject().apply {
                     put("browseId", allSongsBrowseId)
+                    if (!allSongsParams.isNullOrBlank()) {
+                        put("params", allSongsParams)
+                    }
                 }
                 val response = sendRequest("browse", payload)
                 val tracks = mutableListOf<Track>()
                 var nextContinuationToken: String? = null
                 var countString: String? = null
 
-                val contents = response.optJSONObject("contents")
+                // 1. Попытка извлечь заголовок/описание с числом песен
+                val header = response.optJSONObject("header")?.optJSONObject("musicHeaderRenderer")
+                    ?: response.optJSONObject("header")?.optJSONObject("musicDetailHeaderRenderer")
+                    ?: response.optJSONObject("header")?.optJSONObject("musicResponsiveHeaderRenderer")
+                val headerRuns = header?.optJSONObject("subtitle")?.optJSONArray("runs")
+                    ?: header?.optJSONObject("secondSubtitle")?.optJSONArray("runs")
+                if (headerRuns != null) {
+                    for (s in 0 until headerRuns.length()) {
+                        val text = headerRuns.getJSONObject(s).optString("text", "")
+                        if (text.contains("песн", ignoreCase = true) || text.contains("song", ignoreCase = true) || text.contains("трек", ignoreCase = true)) {
+                            countString = text
+                        }
+                    }
+                }
+
+                // 2. Ищем полки с песнями
+                val tabContent = response.optJSONObject("contents")
+                    ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                    ?.optJSONArray("tabs")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("tabRenderer")
+                    ?.optJSONObject("content")
+
+                val directShelf = tabContent?.optJSONObject("musicPlaylistShelfRenderer")
+                    ?: tabContent?.optJSONObject("musicShelfRenderer")
+
+                val shelvesToProcess = mutableListOf<JSONObject>()
+                if (directShelf != null) {
+                    shelvesToProcess.add(directShelf)
+                }
+
+                val contentsArray = response.optJSONObject("contents")
                     ?.optJSONObject("twoColumnBrowseResultsRenderer")
                     ?.optJSONObject("secondaryContents")
                     ?.optJSONObject("sectionListRenderer")
                     ?.optJSONArray("contents")
-                    ?: response.optJSONObject("contents")
-                        ?.optJSONObject("singleColumnBrowseResultsRenderer")
-                        ?.optJSONArray("tabs")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("tabRenderer")
-                        ?.optJSONObject("content")
-                        ?.optJSONObject("sectionListRenderer")
+                    ?: tabContent?.optJSONObject("sectionListRenderer")
                         ?.optJSONArray("contents")
 
-                if (contents != null) {
-                    for (i in 0 until contents.length()) {
-                        val sec = contents.getJSONObject(i)
-                        val shelf = sec.optJSONObject("musicPlaylistShelfRenderer")
+                if (contentsArray != null) {
+                    for (i in 0 until contentsArray.length()) {
+                        val sec = contentsArray.getJSONObject(i)
+                        val s = sec.optJSONObject("musicPlaylistShelfRenderer")
                             ?: sec.optJSONObject("musicShelfRenderer")
-                            ?: continue
+                        if (s != null) shelvesToProcess.add(s)
+                    }
+                }
 
-                        // Проверяем наличие токена продолжения пагинации
-                        val contArray = shelf.optJSONArray("continuations")
-                        if (contArray != null && contArray.length() > 0) {
-                            nextContinuationToken = contArray.getJSONObject(0)
-                                .optJSONObject("nextContinuationData")
+                for (shelf in shelvesToProcess) {
+                    val contArray = shelf.optJSONArray("continuations")
+                    if (contArray != null && contArray.length() > 0) {
+                        nextContinuationToken = contArray.getJSONObject(0)
+                            .optJSONObject("nextContinuationData")
+                            ?.optString("continuation")
+                            ?: contArray.getJSONObject(0)
+                                .optJSONObject("reloadContinuationData")
                                 ?.optString("continuation")
-                        }
+                    }
 
-                        // Ищем строку с количеством песен
+                    if (countString == null) {
                         val subRuns = shelf.optJSONObject("header")
                             ?.optJSONObject("musicHeaderRenderer")
                             ?.optJSONObject("subtitle")
@@ -757,30 +797,83 @@ class InnerTubeRepository {
                                 }
                             }
                         }
+                    }
 
-                        val items = shelf.optJSONArray("contents") ?: continue
-                        for (j in 0 until items.length()) {
-                            val mir = items.getJSONObject(j).optJSONObject("musicResponsiveListItemRenderer") ?: continue
-                            val track = parseTrackFromItemRenderer(mir, artistName, artistId)
-                            if (track != null) {
-                                tracks.add(track)
-                            }
+                    val items = shelf.optJSONArray("contents") ?: continue
+                    for (j in 0 until items.length()) {
+                        val mir = items.getJSONObject(j).optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                        val track = parseTrackFromItemRenderer(mir, artistName, artistId)
+                        if (track != null) {
+                            tracks.add(track)
                         }
                     }
                 }
+
                 if (tracks.isNotEmpty()) {
+                    val finalCountString = countString ?: if (nextContinuationToken != null) "${tracks.size}+ треков" else "${tracks.size} треков"
                     return@withContext ArtistTracksPage(
                         tracks = tracks,
                         continuationToken = nextContinuationToken,
-                        totalCountString = countString
+                        totalCountString = finalCountString
                     )
                 }
             } catch (e: Exception) {
                 // fallback below
             }
         }
-        val fallbackTracks = searchTracks(artistName, limit = 50)
-        ArtistTracksPage(tracks = fallbackTracks)
+
+        // Fallback через поиск треков артиста с поддержкой continuation
+        searchTracksWithContinuation("$artistName", artistName, artistId)
+    }
+
+    suspend fun searchTracksWithContinuation(query: String, defaultArtist: String, artistId: String): ArtistTracksPage = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("query", query)
+                put("params", "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D") // Фильтр только песни (Tracks)
+            }
+            val response = sendRequest("search", payload)
+            val tracks = mutableListOf<Track>()
+            var nextToken: String? = null
+
+            val tabs = response.optJSONObject("contents")
+                ?.optJSONObject("tabbedSearchResultsRenderer")
+                ?.optJSONArray("tabs")
+            val sections = tabs?.optJSONObject(0)
+                ?.optJSONObject("tabRenderer")
+                ?.optJSONObject("content")
+                ?.optJSONObject("sectionListRenderer")
+                ?.optJSONArray("contents")
+
+            if (sections != null) {
+                for (i in 0 until sections.length()) {
+                    val section = sections.getJSONObject(i)
+                    val shelf = section.optJSONObject("musicShelfRenderer")
+                        ?: section.optJSONObject("itemSectionRenderer")
+                        ?: continue
+
+                    val contArray = shelf.optJSONArray("continuations")
+                    if (contArray != null && contArray.length() > 0) {
+                        nextToken = contArray.getJSONObject(0)
+                            .optJSONObject("nextContinuationData")
+                            ?.optString("continuation")
+                    }
+
+                    val items = shelf.optJSONArray("contents") ?: continue
+                    for (j in 0 until items.length()) {
+                        val mir = items.getJSONObject(j).optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                        val track = parseTrackFromItemRenderer(mir, defaultArtist, artistId)
+                        if (track != null) {
+                            tracks.add(track)
+                        }
+                    }
+                }
+            }
+            val countStr = if (nextToken != null) "${tracks.size}+ треков" else "${tracks.size} треков"
+            ArtistTracksPage(tracks = tracks, continuationToken = nextToken, totalCountString = countStr)
+        } catch (e: Exception) {
+            ArtistTracksPage()
+        }
     }
 
     suspend fun getArtistTracksContinuation(continuationToken: String, artistName: String, artistId: String): ArtistTracksPage = withContext(Dispatchers.IO) {
@@ -795,6 +888,7 @@ class InnerTubeRepository {
 
             val shelfCont = response.optJSONObject("continuationContents")?.optJSONObject("musicPlaylistShelfContinuation")
                 ?: response.optJSONObject("continuationContents")?.optJSONObject("musicShelfContinuation")
+                ?: response.optJSONObject("continuationContents")?.optJSONObject("sectionListContinuation")
 
             if (shelfCont != null) {
                 val contArray = shelfCont.optJSONArray("continuations")
@@ -802,12 +896,18 @@ class InnerTubeRepository {
                     nextToken = contArray.getJSONObject(0)
                         .optJSONObject("nextContinuationData")
                         ?.optString("continuation")
+                        ?: contArray.getJSONObject(0)
+                            .optJSONObject("reloadContinuationData")
+                            ?.optString("continuation")
                 }
 
                 val items = shelfCont.optJSONArray("contents")
                 if (items != null) {
                     for (i in 0 until items.length()) {
-                        val mir = items.getJSONObject(i).optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                        val itemObj = items.getJSONObject(i)
+                        val mir = itemObj.optJSONObject("musicResponsiveListItemRenderer")
+                            ?: itemObj.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")?.optJSONObject(0)?.optJSONObject("musicResponsiveListItemRenderer")
+                            ?: continue
                         val track = parseTrackFromItemRenderer(mir, artistName, artistId)
                         if (track != null) {
                             tracks.add(track)
@@ -866,7 +966,14 @@ class InnerTubeRepository {
             ?.optJSONObject("musicPlayButtonRenderer")
             ?.optJSONObject("playNavigationEndpoint")
             ?.optJSONObject("watchEndpoint")
-            ?.optString("videoId") ?: ""
+            ?.optString("videoId")
+            ?: mir.optJSONObject("navigationEndpoint")
+                ?.optJSONObject("watchEndpoint")
+                ?.optString("videoId")
+            ?: mir.optJSONObject("doubleTapCommand")
+                ?.optJSONObject("watchEndpoint")
+                ?.optString("videoId")
+            ?: ""
 
         val thumbs = mir.optJSONObject("thumbnail")
             ?.optJSONObject("musicThumbnailRenderer")
