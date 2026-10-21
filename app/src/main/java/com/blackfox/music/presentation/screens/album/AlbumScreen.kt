@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.download.DownloadStatus
 import com.blackfox.music.domain.model.Track
@@ -46,6 +47,7 @@ fun AlbumScreen(
     val playlists by viewModel.playlists.collectAsState()
     val favorites by viewModel.favoriteTrackIds.collectAsState()
     val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
+    val accentColor = LocalAccentTheme.current.primary
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
 
     Box(
@@ -58,7 +60,7 @@ fun AlbumScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = FoxOrange)
+                CircularProgressIndicator(color = accentColor)
             }
         } else if (uiState.album != null) {
             val album = uiState.album!!
@@ -138,7 +140,7 @@ fun AlbumScreen(
                                         onPlayTrack(album.tracks.first())
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = FoxOrange),
+                                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.height(46.dp)
                             ) {
@@ -188,7 +190,7 @@ fun AlbumScreen(
                                 Icon(
                                     imageVector = Icons.Default.Download,
                                     contentDescription = "Скачать альбом",
-                                    tint = FoxOrange,
+                                    tint = accentColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -256,7 +258,7 @@ fun AlbumScreen(
                                 Box(contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator(
                                         progress = { if (percent > 0) percent / 100f else 0.15f },
-                                        color = FoxOrange,
+                                        color = accentColor,
                                         trackColor = ObsidianCard,
                                         strokeWidth = 2.dp,
                                         modifier = Modifier.size(24.dp)
@@ -264,7 +266,7 @@ fun AlbumScreen(
                                     if (percent > 0) {
                                         Text(
                                             text = "$percent%",
-                                            color = FoxOrange,
+                                            color = accentColor,
                                             fontSize = 7.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -274,7 +276,7 @@ fun AlbumScreen(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = "Скачано",
-                                    tint = FoxOrange,
+                                    tint = accentColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             } else {
@@ -295,7 +297,7 @@ fun AlbumScreen(
                             Icon(
                                 imageVector = if (isFav) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                                 contentDescription = "Избранное",
-                                tint = if (isFav) FoxOrange else TextMuted,
+                                tint = if (isFav) accentColor else TextMuted,
                                 modifier = Modifier.size(20.dp)
                             )
                         }

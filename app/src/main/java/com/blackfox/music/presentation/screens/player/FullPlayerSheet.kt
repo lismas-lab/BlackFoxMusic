@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
@@ -52,6 +53,7 @@ fun FullPlayerSheet(
     repository: InnerTubeRepository = remember { InnerTubeRepository() },
     modifier: Modifier = Modifier
 ) {
+    val accentColor = LocalAccentTheme.current.primary
     var isLyricsMode by remember { mutableStateOf(false) }
     var lyricsPair by remember { mutableStateOf<Pair<String, String>?>(null) }
     var isLyricsLoading by remember { mutableStateOf(false) }
@@ -126,7 +128,7 @@ fun FullPlayerSheet(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (!isLyricsMode) FoxOrange else Color.Transparent)
+                            .background(if (!isLyricsMode) accentColor else Color.Transparent)
                             .clickable { isLyricsMode = false }
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
@@ -142,7 +144,7 @@ fun FullPlayerSheet(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (isLyricsMode) FoxOrange else Color.Transparent)
+                            .background(if (isLyricsMode) accentColor else Color.Transparent)
                             .clickable { isLyricsMode = true }
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
@@ -195,7 +197,7 @@ fun FullPlayerSheet(
                     ) {
                         if (isLyricsLoading) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = FoxOrange, modifier = Modifier.size(36.dp))
+                                CircularProgressIndicator(color = accentColor, modifier = Modifier.size(36.dp))
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text("Загрузка текста песни...", color = TextSecondary, fontSize = 13.sp)
                             }
@@ -275,7 +277,7 @@ fun FullPlayerSheet(
                     ) {
                         Text(
                             text = track.artist,
-                            color = FoxOrange,
+                            color = accentColor,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -285,7 +287,7 @@ fun FullPlayerSheet(
                         Icon(
                             imageVector = Icons.Default.Person,
                             contentDescription = "К артисту",
-                            tint = FoxOrange,
+                            tint = accentColor,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -299,7 +301,7 @@ fun FullPlayerSheet(
                     Icon(
                         imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                         contentDescription = "Избранное",
-                        tint = if (isFavorite) FoxOrange else TextSecondary,
+                        tint = if (isFavorite) accentColor else TextSecondary,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -324,8 +326,8 @@ fun FullPlayerSheet(
                     isUserSeeking = false
                 },
                 colors = SliderDefaults.colors(
-                    thumbColor = FoxOrange,
-                    activeTrackColor = FoxOrange,
+                    thumbColor = accentColor,
+                    activeTrackColor = accentColor,
                     inactiveTrackColor = Color.White.copy(alpha = 0.15f)
                 ),
                 modifier = Modifier.fillMaxWidth()
@@ -383,11 +385,11 @@ fun FullPlayerSheet(
                         .shadow(
                             elevation = 16.dp,
                             shape = CircleShape,
-                            ambientColor = FoxOrangeGlow,
-                            spotColor = FoxOrange
+                            ambientColor = accentColor.copy(alpha = 0.4f),
+                            spotColor = accentColor
                         )
                         .clip(CircleShape)
-                        .background(FoxOrange)
+                        .background(accentColor)
                         .clickable(onClick = onPlayPauseClick),
                     contentAlignment = Alignment.Center
                 ) {
@@ -414,7 +416,7 @@ fun FullPlayerSheet(
                     Icon(
                         imageVector = Icons.Default.Lyrics,
                         contentDescription = "Текст песни",
-                        tint = if (isLyricsMode) FoxOrange else TextSecondary,
+                        tint = if (isLyricsMode) accentColor else TextSecondary,
                         modifier = Modifier.size(26.dp)
                     )
                 }

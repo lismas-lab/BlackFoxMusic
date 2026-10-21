@@ -145,4 +145,20 @@ interface MusicDao {
 
     @Query("SELECT COUNT(*) FROM playlist_track_cross_ref WHERE trackId = :trackId AND playlistId != :excludePlaylistId")
     suspend fun countPlaylistsContainingTrack(trackId: String, excludePlaylistId: Long): Int
+
+    // --- ПОДПИСКИ НА АРТИСТОВ ---
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun followArtist(artist: ArtistEntity)
+
+    @Query("DELETE FROM followed_artists WHERE channelId = :channelId")
+    suspend fun unfollowArtist(channelId: String)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM followed_artists WHERE channelId = :channelId)")
+    fun isArtistFollowed(channelId: String): Flow<Boolean>
+
+    @Query("SELECT * FROM followed_artists ORDER BY followedAt DESC")
+    fun getAllFollowedArtists(): Flow<List<ArtistEntity>>
+
+    @Query("SELECT COUNT(*) FROM followed_artists")
+    fun getFollowedArtistsCount(): Flow<Int>
 }

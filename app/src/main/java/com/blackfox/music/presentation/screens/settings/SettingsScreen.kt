@@ -644,7 +644,7 @@ private fun QualityOption(
 @Composable
 private fun SettingsSection(
     title: String,
-    accentColor: Color = FoxOrange,
+    accentColor: Color = LocalAccentTheme.current.primary,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column {
@@ -672,7 +672,7 @@ private fun SettingsItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    iconTint: Color = FoxOrange,
+    iconTint: Color = LocalAccentTheme.current.primary,
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {

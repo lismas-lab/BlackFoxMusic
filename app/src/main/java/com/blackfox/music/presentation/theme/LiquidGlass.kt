@@ -5,12 +5,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.blackfox.music.data.local.LocalAccentTheme
 
 /**
  * Модификатор Liquid Glass (Жидкое стекло):
@@ -45,18 +47,20 @@ fun Modifier.liquidGlass(
  * Эффект плавающего стекла для мини-плеера и навигационных панелей
  */
 fun Modifier.floatingGlass(
-    cornerRadius: Dp = 24.dp
-): Modifier {
+    cornerRadius: Dp = 24.dp,
+    accentColor: Color? = null
+): Modifier = composed {
+    val themeAccent = accentColor ?: LocalAccentTheme.current.color
     val shape = RoundedCornerShape(cornerRadius)
     val borderBrush = Brush.verticalGradient(
         listOf(
             Color.White.copy(alpha = 0.22f),
             Color.White.copy(alpha = 0.05f),
-            FoxOrange.copy(alpha = 0.12f)
+            themeAccent.copy(alpha = 0.15f)
         )
     )
 
-    return this
+    this
         .clip(shape)
         .background(Color(0xE60F1117), shape) // 90% непрозрачный оникс для комфорта чтения
         .border(1.dp, borderBrush, shape)

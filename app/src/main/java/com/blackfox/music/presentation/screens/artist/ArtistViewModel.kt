@@ -3,6 +3,7 @@ package com.blackfox.music.presentation.screens.artist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.blackfox.music.data.download.AudioDownloadManager
+import com.blackfox.music.data.local.ArtistEntity
 import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.local.PlaylistEntity
 import com.blackfox.music.data.local.TrackEntity
@@ -47,6 +48,13 @@ class ArtistViewModel(
     val downloadedTrackIds: StateFlow<Set<String>> = musicDao.getDownloadedTrackIds()
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val isFollowed: StateFlow<Boolean> = uiState
+        .flatMapLatest { state ->
+            val cid = state.artist?.channelId ?: channelId
+            if (cid.isNotBlank()) musicDao.isArtistFollowed(cid) else flowOf(false)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
         loadArtist()
@@ -190,6 +198,27 @@ class ArtistViewModel(
     fun createPlaylistAndAddTrack(name: String, track: Track) {
         viewModelScope.launch {
             playlistRepository.createPlaylistAndAddTrack(name, track)
+        }
+    }
+
+    fun toggleFollowArtist() {
+        val a = uiState.value.artist ?: return
+        val cid = a.channelId
+        if (cid.isBlank()) return
+
+        viewModelScope.launch {
+            if (isFollowed.value) {
+                musicDao.unfollowArtist(cid)
+            } else {
+                musicDao.followArtist(
+                    ArtistEntity(
+                        channelId = cid,
+                        name = a.name,
+                        thumbnailUrl = a.avatarUrl,
+                        subscribers = a.subscribers
+                    )
+                )
+            }
         }
     }
 }

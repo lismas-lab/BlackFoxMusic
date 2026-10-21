@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.blackfox.music.data.download.DownloadProgress
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.components.TrackListItem
@@ -47,6 +48,7 @@ fun FavoritesDetailScreen(
     isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val accent = LocalAccentTheme.current.primary
     var localTracks by remember { mutableStateOf(favoriteTracks) }
     var draggingTrackId by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
@@ -105,7 +107,7 @@ fun FavoritesDetailScreen(
                             .clip(RoundedCornerShape(32.dp))
                             .background(
                                 Brush.radialGradient(
-                                    listOf(FoxOrange.copy(alpha = 0.5f), Color(0x1AFFFFFF))
+                                    listOf(accent.copy(alpha = 0.5f), Color(0x1AFFFFFF))
                                 )
                             ),
                         contentAlignment = Alignment.Center
@@ -113,7 +115,7 @@ fun FavoritesDetailScreen(
                         Icon(
                             imageVector = Icons.Default.Favorite,
                             contentDescription = "Любимое",
-                            tint = FoxOrange,
+                            tint = accent,
                             modifier = Modifier.size(80.dp)
                         )
                     }
@@ -146,7 +148,7 @@ fun FavoritesDetailScreen(
                         ) {
                             Button(
                                 onClick = onPlayAll,
-                                colors = ButtonDefaults.buttonColors(containerColor = FoxOrange),
+                                colors = ButtonDefaults.buttonColors(containerColor = accent),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .weight(1f)

@@ -24,6 +24,7 @@ import com.blackfox.music.presentation.components.GlassSearchBar
 import com.blackfox.music.presentation.components.GlowingFoxLogo
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.presentation.components.TrackListItem
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.presentation.theme.*
 
 @Composable
@@ -38,6 +39,7 @@ fun SearchScreen(
     val query by viewModel.query.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val accentColor = LocalAccentTheme.current.primary
     val playlists by viewModel.playlists.collectAsState()
     val favorites by viewModel.favoriteTrackIds.collectAsState()
 
@@ -79,7 +81,7 @@ fun SearchScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) FoxOrange else Color(0x12FFFFFF))
+                            .background(if (isSelected) accentColor else Color(0x12FFFFFF))
                             .clickable { viewModel.onFilterSelect(filter) }
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
@@ -104,7 +106,7 @@ fun SearchScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
-                        color = FoxOrange,
+                        color = accentColor,
                         modifier = Modifier.size(36.dp)
                     )
                 }

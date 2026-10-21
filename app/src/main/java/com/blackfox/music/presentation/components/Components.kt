@@ -81,7 +81,7 @@ fun GlassSearchBar(
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Поиск",
-                    tint = if (query.isNotBlank()) FoxOrange else TextSecondary,
+                    tint = if (query.isNotBlank()) LocalAccentTheme.current.primary else TextSecondary,
                     modifier = Modifier.size(22.dp)
                 )
 
@@ -115,7 +115,7 @@ fun GlassSearchBar(
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        cursorBrush = SolidColor(FoxOrange),
+                        cursorBrush = SolidColor(LocalAccentTheme.current.primary),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -164,7 +164,7 @@ fun GlassSearchBar(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = FoxOrange,
+                            tint = LocalAccentTheme.current.primary,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -578,7 +578,7 @@ fun ArtistGridItem(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = artist.name,
-                    tint = FoxOrange,
+                    tint = LocalAccentTheme.current.primary,
                     modifier = Modifier.size(36.dp)
                 )
             }
@@ -641,7 +641,7 @@ fun ArtistListItem(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = artist.name,
-                    tint = FoxOrange,
+                    tint = LocalAccentTheme.current.primary,
                     modifier = Modifier.size(30.dp)
                 )
             }

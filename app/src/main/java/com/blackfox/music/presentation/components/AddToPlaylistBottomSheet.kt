@@ -27,6 +27,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.local.PlaylistEntity
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
@@ -45,6 +46,7 @@ fun AddToPlaylistBottomSheet(
     onCreatePlaylistAndAdd: (name: String) -> Unit
 ) {
     var newPlaylistName by remember { mutableStateOf("") }
+    val accentColor = LocalAccentTheme.current.primary
     val userPlaylists = remember(playlists) { playlists.filter { !it.isFavoriteSystem } }
 
     ModalBottomSheet(
@@ -82,7 +84,7 @@ fun AddToPlaylistBottomSheet(
                 )
 
                 TextButton(onClick = onDismiss) {
-                    Text("Готово", color = FoxOrange, fontWeight = FontWeight.Bold)
+                    Text("Готово", color = accentColor, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -123,7 +125,7 @@ fun AddToPlaylistBottomSheet(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        cursorBrush = SolidColor(FoxOrange),
+                        cursorBrush = SolidColor(accentColor),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -139,7 +141,7 @@ fun AddToPlaylistBottomSheet(
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Создать",
-                            tint = FoxOrange,
+                            tint = accentColor,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -177,7 +179,7 @@ fun AddToPlaylistBottomSheet(
                                 .liquidGlass(
                                     cornerRadius = 14.dp,
                                     backgroundColor = if (contains) Color(0x28FFFFFF) else Color(0x0EFFFFFF),
-                                    borderColor = if (contains) FoxOrange.copy(alpha = 0.5f) else GlassBorder
+                                    borderColor = if (contains) accentColor.copy(alpha = 0.5f) else GlassBorder
                                 )
                                 .clickable { onToggleTrackInPlaylist(pl.playlistId) }
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
@@ -185,7 +187,7 @@ fun AddToPlaylistBottomSheet(
                         ) {
                             Text(
                                 text = pl.name,
-                                color = if (contains) FoxOrange else TextPrimary,
+                                color = if (contains) accentColor else TextPrimary,
                                 fontSize = 15.sp,
                                 fontWeight = if (contains) FontWeight.Bold else FontWeight.Medium,
                                 modifier = Modifier.weight(1f)
@@ -196,10 +198,10 @@ fun AddToPlaylistBottomSheet(
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(if (contains) FoxOrange else Color.Transparent)
+                                    .background(if (contains) accentColor else Color.Transparent)
                                     .border(
                                         width = 1.5.dp,
-                                        color = if (contains) FoxOrange else Color.White.copy(alpha = 0.35f),
+                                        color = if (contains) accentColor else Color.White.copy(alpha = 0.35f),
                                         shape = RoundedCornerShape(7.dp)
                                     ),
                                 contentAlignment = Alignment.Center

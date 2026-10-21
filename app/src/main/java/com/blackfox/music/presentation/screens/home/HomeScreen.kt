@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.*
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.blackfox.music.data.download.DownloadProgress
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.domain.model.Album
 import com.blackfox.music.domain.model.Artist
@@ -43,6 +45,8 @@ fun HomeScreen(
     favoriteTracks: List<TrackEntity>,
     userPlaylistsCount: Int,
     allSavedTracks: List<TrackEntity> = emptyList(),
+    randomSavedPreviewTracks: List<TrackEntity> = emptyList(),
+    newReleasesFromFollowedArtists: List<Track> = emptyList(),
     currentTrack: Track? = null,
     isPlaying: Boolean = false,
     onTrackPlay: (track: Track, queue: List<Track>) -> Unit,
@@ -64,6 +68,7 @@ fun HomeScreen(
     val favorites by viewModel.favoriteTrackIds.collectAsState()
     val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
     val suggestions by viewModel.suggestions.collectAsState()
+    val accentColor = LocalAccentTheme.current.primary
 
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
 
@@ -125,7 +130,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) FoxOrange else Color(0x14FFFFFF))
+                            .background(if (isSelected) accentColor else Color(0x14FFFFFF))
                             .clickable { viewModel.onFilterSelect(filter) }
                             .padding(horizontal = 16.dp, vertical = 7.dp)
                     ) {
@@ -150,7 +155,7 @@ fun HomeScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
-                        color = FoxOrange,
+                        color = accentColor,
                         modifier = Modifier.size(36.dp)
                     )
                 }
@@ -173,7 +178,7 @@ fun HomeScreen(
                                     cornerRadius = 24.dp,
                                     backgroundColor = Color(0x18FFFFFF),
                                     borderBrush = Brush.linearGradient(
-                                        listOf(FoxOrange.copy(alpha = 0.85f), FoxOrange.copy(alpha = 0.15f))
+                                        listOf(accentColor.copy(alpha = 0.85f), accentColor.copy(alpha = 0.15f))
                                     )
                                 )
                                 .clickable { onStartFoxFlow() }
@@ -189,7 +194,7 @@ fun HomeScreen(
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(
                                             Brush.radialGradient(
-                                                listOf(FoxOrange, FoxOrange.copy(alpha = 0.35f))
+                                                listOf(accentColor, accentColor.copy(alpha = 0.35f))
                                             )
                                         ),
                                     contentAlignment = Alignment.Center
@@ -216,12 +221,12 @@ fun HomeScreen(
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .background(FoxOrange.copy(alpha = 0.25f))
+                                                .background(accentColor.copy(alpha = 0.25f))
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
                                             Text(
                                                 text = "Моя волна",
-                                                color = FoxOrange,
+                                                color = accentColor,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -242,7 +247,7 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .size(42.dp)
                                         .clip(CircleShape)
-                                        .background(FoxOrange)
+                                        .background(accentColor)
                                         .clickable { onStartFoxFlow() },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -271,7 +276,7 @@ fun HomeScreen(
                                         cornerRadius = 20.dp,
                                         backgroundColor = Color(0x18FFFFFF),
                                         borderBrush = Brush.linearGradient(
-                                            listOf(FoxOrange.copy(alpha = 0.5f), Color.Transparent)
+                                            listOf(accentColor.copy(alpha = 0.5f), Color.Transparent)
                                         )
                                     )
                                     .clickable { onNavigateToFavorites() }
@@ -287,13 +292,13 @@ fun HomeScreen(
                                             modifier = Modifier
                                                 .size(36.dp)
                                                 .clip(CircleShape)
-                                                .background(FoxOrange.copy(alpha = 0.2f)),
+                                                .background(accentColor.copy(alpha = 0.2f)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Favorite,
                                                 contentDescription = null,
-                                                tint = FoxOrange,
+                                                tint = accentColor,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
@@ -303,7 +308,7 @@ fun HomeScreen(
                                                 modifier = Modifier
                                                     .size(32.dp)
                                                     .clip(CircleShape)
-                                                    .background(FoxOrange)
+                                                    .background(accentColor)
                                                     .clickable { onPlayFavorites() },
                                                 contentAlignment = Alignment.Center
                                             ) {
@@ -375,10 +380,139 @@ fun HomeScreen(
                         }
                     }
 
+                    // Раздел "Новинки от ваших артистов"
+                    if (newReleasesFromFollowedArtists.isNotEmpty()) {
+                        item {
+                            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(accentColor.copy(alpha = 0.2f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.NewReleases,
+                                                contentDescription = null,
+                                                tint = accentColor,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = "Новинки ваших артистов",
+                                                color = TextPrimary,
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = "Свежие треки за последний месяц",
+                                                color = TextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp)
+                                ) {
+                                    items(newReleasesFromFollowedArtists, key = { it.id }) { track ->
+                                        Box(
+                                            modifier = Modifier
+                                                .width(150.dp)
+                                                .liquidGlass(cornerRadius = 18.dp, backgroundColor = Color(0x16FFFFFF))
+                                                .clickable { onTrackPlay(track, newReleasesFromFollowedArtists) }
+                                                .padding(10.dp)
+                                        ) {
+                                            Column {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(130.dp)
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .background(ObsidianCard)
+                                                ) {
+                                                    AsyncImage(
+                                                        model = track.thumbnailUrl,
+                                                        contentDescription = track.title,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(6.dp)
+                                                            .align(Alignment.TopStart)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(accentColor)
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "NEW",
+                                                            color = ObsidianBlack,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(6.dp)
+                                                            .align(Alignment.BottomEnd)
+                                                            .size(32.dp)
+                                                            .clip(CircleShape)
+                                                            .background(accentColor)
+                                                            .clickable { onTrackPlay(track, newReleasesFromFollowedArtists) },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.PlayArrow,
+                                                            contentDescription = "Слушать",
+                                                            tint = ObsidianBlack,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(8.dp))
+
+                                                Text(
+                                                    text = track.title,
+                                                    color = TextPrimary,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = track.artist,
+                                                    color = TextSecondary,
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Баннер "Случайное из сохраненного" (отображает 3 первых трека из цепочки)
                     if (allSavedTracks.isNotEmpty()) {
                         item {
-                            val firstThree = remember(allSavedTracks) { allSavedTracks.shuffled().take(3) }
+                            val firstThree = if (randomSavedPreviewTracks.isNotEmpty()) randomSavedPreviewTracks.take(3) else allSavedTracks.take(3)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -396,14 +530,14 @@ fun HomeScreen(
                                             Box(
                                                 modifier = Modifier
                                                     .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(FoxOrange.copy(alpha = 0.2f)),
+                                                .clip(CircleShape)
+                                                .background(accentColor.copy(alpha = 0.2f)),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Shuffle,
                                                     contentDescription = null,
-                                                    tint = FoxOrange,
+                                                    tint = accentColor,
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                             }
@@ -427,7 +561,7 @@ fun HomeScreen(
                                             modifier = Modifier
                                                 .size(38.dp)
                                                 .clip(CircleShape)
-                                                .background(FoxOrange)
+                                                .background(accentColor)
                                                 .clickable { onPlaySavedRandom() },
                                             contentAlignment = Alignment.Center
                                         ) {

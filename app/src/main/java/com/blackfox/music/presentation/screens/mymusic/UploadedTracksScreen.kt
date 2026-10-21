@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.local.PlaylistEntity
 import com.blackfox.music.data.local.TrackEntity
@@ -55,6 +56,7 @@ fun UploadedTracksScreen(
     isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val accent = LocalAccentTheme.current.primary
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isImporting by remember { mutableStateOf(false) }
@@ -134,7 +136,7 @@ fun UploadedTracksScreen(
                         // Кнопка Добавить аудио
                         Button(
                             onClick = { audioPickerLauncher.launch(arrayOf("audio/*")) },
-                            colors = ButtonDefaults.buttonColors(containerColor = FoxOrange),
+                            colors = ButtonDefaults.buttonColors(containerColor = accent),
                             shape = RoundedCornerShape(16.dp),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                         ) {
@@ -158,7 +160,7 @@ fun UploadedTracksScreen(
                             .clip(RoundedCornerShape(32.dp))
                             .background(
                                 Brush.radialGradient(
-                                    listOf(FoxOrange.copy(alpha = 0.4f), Color(0x18FFFFFF))
+                                    listOf(accent.copy(alpha = 0.4f), Color(0x18FFFFFF))
                                 )
                             ),
                         contentAlignment = Alignment.Center
@@ -166,7 +168,7 @@ fun UploadedTracksScreen(
                         Icon(
                             imageVector = Icons.Default.FolderOpen,
                             contentDescription = "Загруженные",
-                            tint = FoxOrange,
+                            tint = accent,
                             modifier = Modifier.size(64.dp)
                         )
                     }
@@ -197,7 +199,7 @@ fun UploadedTracksScreen(
                                 .liquidGlass(cornerRadius = 14.dp, backgroundColor = Color(0x18FFFFFF))
                                 .padding(horizontal = 16.dp, vertical = 10.dp)
                         ) {
-                            CircularProgressIndicator(color = FoxOrange, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(color = accent, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("Импорт аудиозаписей...", color = TextPrimary, fontSize = 13.sp)
                         }
@@ -212,7 +214,7 @@ fun UploadedTracksScreen(
                         ) {
                             Button(
                                 onClick = onPlayAll,
-                                colors = ButtonDefaults.buttonColors(containerColor = FoxOrange),
+                                colors = ButtonDefaults.buttonColors(containerColor = accent),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -363,7 +365,7 @@ fun UploadedTracksScreen(
                             }
                         }
                     ) {
-                        Text("Удалить", color = FoxOrange, fontWeight = FontWeight.Bold)
+                        Text("Удалить", color = accent, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {

@@ -3,6 +3,7 @@ package com.blackfox.music.presentation.screens.artist
 import com.blackfox.music.data.local.LocalAccentTheme
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,8 +14,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -68,6 +71,8 @@ fun ArtistScreen(
     val isLoadingMoreTracks by viewModel.isLoadingMoreTracks.collectAsState()
     val hasMoreTracks by viewModel.hasMoreTracks.collectAsState()
     val totalSongsCount by viewModel.totalSongsCountString.collectAsState()
+    val isFollowed by viewModel.isFollowed.collectAsState()
+    val accentColor = LocalAccentTheme.current.primary
 
     var selectedTab by remember { mutableStateOf(ArtistTab.OVERVIEW) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
@@ -115,7 +120,7 @@ fun ArtistScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = FoxOrange)
+                    CircularProgressIndicator(color = accentColor)
                 }
             } else if (uiState.error != null && uiState.artist == null) {
                 Box(
@@ -154,7 +159,7 @@ fun ArtistScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) FoxOrange.copy(alpha = 0.2f) else Color(0x14FFFFFF))
+                                .background(if (isSelected) accentColor.copy(alpha = 0.2f) else Color(0x14FFFFFF))
                                 .clickable {
                                     selectedTab = tab
                                     if (tab == ArtistTab.ALL_SONGS && allTracks.isEmpty()) {
@@ -166,7 +171,7 @@ fun ArtistScreen(
                         ) {
                             Text(
                                 text = "${tab.title}$countSuffix",
-                                color = if (isSelected) FoxOrange else TextSecondary,
+                                color = if (isSelected) accentColor else TextSecondary,
                                 fontSize = 13.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
@@ -208,7 +213,7 @@ fun ArtistScreen(
                                             Icon(
                                                 imageVector = Icons.Default.Person,
                                                 contentDescription = artist.name,
-                                                tint = FoxOrange,
+                                                tint = accentColor,
                                                 modifier = Modifier.size(60.dp)
                                             )
                                         }
@@ -235,29 +240,69 @@ fun ArtistScreen(
 
                                     Spacer(modifier = Modifier.height(16.dp))
 
-                                    val primaryPlayList = if (allTracks.isNotEmpty()) allTracks else artist.topTracks
-                                    if (primaryPlayList.isNotEmpty()) {
-                                        Button(
-                                            onClick = { onPlayTrack(primaryPlayList[0], primaryPlayList) },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = FoxOrange,
-                                                contentColor = ObsidianBlack
-                                            ),
-                                            shape = RoundedCornerShape(24.dp),
-                                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val primaryPlayList = if (allTracks.isNotEmpty()) allTracks else artist.topTracks
+                                        if (primaryPlayList.isNotEmpty()) {
+                                            Button(
+                                                onClick = { onPlayTrack(primaryPlayList[0], primaryPlayList) },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = accentColor,
+                                                    contentColor = ObsidianBlack
+                                                ),
+                                                shape = RoundedCornerShape(24.dp),
+                                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = ObsidianBlack,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Слушать всё",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp
+                                                )
+                                            }
+                                        }
+
+                                        // Кнопка подписки на артиста
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(24.dp))
+                                                .then(
+                                                    if (isFollowed) {
+                                                        Modifier.liquidGlass(cornerRadius = 24.dp, backgroundColor = Color(0x22FFFFFF))
+                                                    } else {
+                                                        Modifier.background(accentColor.copy(alpha = 0.2f))
+                                                            .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                                                    }
+                                                )
+                                                .clickable { viewModel.toggleFollowArtist() }
+                                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = ObsidianBlack,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "Слушать всё",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isFollowed) Icons.Default.Check else Icons.Default.PersonAdd,
+                                                    contentDescription = null,
+                                                    tint = if (isFollowed) TextSecondary else accentColor,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Text(
+                                                    text = if (isFollowed) "Вы подписаны" else "Подписаться",
+                                                    color = if (isFollowed) TextSecondary else accentColor,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -292,14 +337,14 @@ fun ArtistScreen(
                                         ) {
                                             Text(
                                                 text = "Все треки",
-                                                color = FoxOrange,
+                                                color = accentColor,
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                             Icon(
                                                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                                 contentDescription = null,
-                                                tint = FoxOrange,
+                                                tint = accentColor,
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }
@@ -413,7 +458,7 @@ fun ArtistScreen(
                                     if (activeTracks.isNotEmpty()) {
                                         Button(
                                             onClick = { onPlayTrack(activeTracks[0], activeTracks) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = FoxOrange),
+                                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
                                             shape = RoundedCornerShape(16.dp),
                                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                                         ) {
@@ -438,7 +483,7 @@ fun ArtistScreen(
                                             .padding(32.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        CircularProgressIndicator(color = FoxOrange)
+                                        CircularProgressIndicator(color = accentColor)
                                     }
                                 }
                             } else {

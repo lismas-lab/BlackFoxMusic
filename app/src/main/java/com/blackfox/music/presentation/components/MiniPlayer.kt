@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
 
@@ -41,8 +42,9 @@ fun FloatingMiniPlayer(
     onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val accentColor = LocalAccentTheme.current.primary
     val heartColor by animateColorAsState(
-        targetValue = if (isFavorite) FoxOrange else TextMuted,
+        targetValue = if (isFavorite) accentColor else TextMuted,
         label = "HeartColor"
     )
 
@@ -98,9 +100,9 @@ fun FloatingMiniPlayer(
                 Box(
                     modifier = Modifier
                         .size(42.dp)
-                        .shadow(elevation = 6.dp, shape = CircleShape, ambientColor = FoxOrangeGlow, spotColor = FoxOrange)
+                        .shadow(elevation = 6.dp, shape = CircleShape, ambientColor = accentColor.copy(alpha = 0.35f), spotColor = accentColor)
                         .clip(CircleShape)
-                        .background(FoxOrange)
+                        .background(accentColor)
                         .clickable(onClick = onPlayPauseClick),
                     contentAlignment = Alignment.Center
                 ) {
@@ -139,7 +141,7 @@ fun FloatingMiniPlayer(
                     modifier = Modifier
                         .fillMaxHeight()
                         .fillMaxWidth(fraction = progressFraction.coerceIn(0f, 1f))
-                        .background(FoxOrange)
+                        .background(accentColor)
                 )
             }
         }

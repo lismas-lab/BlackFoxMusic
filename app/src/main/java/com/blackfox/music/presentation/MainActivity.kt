@@ -36,6 +36,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.blackfox.music.BlackFoxApp
 import com.blackfox.music.data.local.TrackEntity
+import com.blackfox.music.data.local.toDomain
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
@@ -48,6 +49,7 @@ import com.blackfox.music.presentation.screens.artist.ArtistViewModel
 import com.blackfox.music.presentation.screens.home.HomeScreen
 import com.blackfox.music.presentation.screens.mymusic.DownloadedTracksScreen
 import com.blackfox.music.presentation.screens.mymusic.FavoritesDetailScreen
+import com.blackfox.music.presentation.screens.mymusic.FollowedArtistsScreen
 import com.blackfox.music.presentation.screens.mymusic.MyMusicScreen
 import com.blackfox.music.presentation.screens.mymusic.PlaylistDetailScreen
 import com.blackfox.music.presentation.screens.mymusic.UploadedTracksScreen
@@ -61,17 +63,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-fun TrackEntity.toDomain(): Track = Track(
-    id = id,
-    title = title,
-    artist = artist,
-    album = album,
-    duration = duration,
-    thumbnailUrl = thumbnailUrl,
-    isDownloaded = isDownloaded,
-    localFilePath = localFilePath
-)
 
 enum class MainTab(val title: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
@@ -126,6 +117,7 @@ class MainActivity : ComponentActivity() {
                 var isFavoritesOpen by remember { mutableStateOf(false) }
                 var isDownloadedOpen by remember { mutableStateOf(false) }
                 var isUploadedOpen by remember { mutableStateOf(false) }
+                var isFollowedArtistsOpen by remember { mutableStateOf(false) }
                 var isFullPlayerVisible by remember { mutableStateOf(false) }
                 var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
 
@@ -133,7 +125,8 @@ class MainActivity : ComponentActivity() {
                 BackHandler(
                     enabled = isFullPlayerVisible || selectedAlbumBrowseId != null ||
                             selectedArtistId != null || selectedArtistName != null ||
-                            selectedPlaylistId != null || isFavoritesOpen || isDownloadedOpen || isUploadedOpen || currentTab != MainTab.HOME
+                            selectedPlaylistId != null || isFavoritesOpen || isDownloadedOpen || isUploadedOpen ||
+                            isFollowedArtistsOpen || currentTab != MainTab.HOME
                 ) {
                     when {
                         isFullPlayerVisible -> isFullPlayerVisible = false
@@ -146,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         isFavoritesOpen -> isFavoritesOpen = false
                         isDownloadedOpen -> isDownloadedOpen = false
                         isUploadedOpen -> isUploadedOpen = false
+                        isFollowedArtistsOpen -> isFollowedArtistsOpen = false
                         currentTab != MainTab.HOME -> currentTab = MainTab.HOME
                     }
                 }
@@ -166,6 +160,7 @@ class MainActivity : ComponentActivity() {
                 val favoriteTrackIds by musicDao.getFavoriteTrackIds().collectAsState(initial = emptyList())
                 val userUploadedTracks by musicDao.getUserUploadedTracks().collectAsState(initial = emptyList())
                 val downloadedCount by musicDao.getDownloadedCount().collectAsState(initial = 0)
+                val followedArtists by musicDao.getAllFollowedArtists().collectAsState(initial = emptyList())
                 val favoriteSet = remember(favoriteTrackIds) { favoriteTrackIds.toSet() }
 
                 // Полная коллекция сохраненных треков (из плейлистов, любимого и загруженных)
@@ -184,6 +179,41 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     result
+                }
+
+                // Случайный микс из сохраненных треков, фиксированный на время сессии приложения
+                var sessionSavedRandomChain by remember { mutableStateOf<List<TrackEntity>>(emptyList()) }
+                var hasInitializedSavedRandom by remember { mutableStateOf(false) }
+                LaunchedEffect(allSavedTracks) {
+                    if (allSavedTracks.isNotEmpty() && !hasInitializedSavedRandom) {
+                        sessionSavedRandomChain = allSavedTracks.shuffled()
+                        hasInitializedSavedRandom = true
+                    }
+                }
+
+                // Новинки артистов, на которых подписан пользователь
+                var newReleasesFromFollowedArtists by remember { mutableStateOf<List<Track>>(emptyList()) }
+                LaunchedEffect(followedArtists) {
+                    if (followedArtists.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            val releases = mutableListOf<Track>()
+                            val sampleArtists = followedArtists.take(5)
+                            for (artist in sampleArtists) {
+                                try {
+                                    val details = repository.getArtistDetails(artist.channelId)
+                                    releases.addAll(details.topTracks.take(4))
+                                } catch (e: Exception) {
+                                    try {
+                                        val tracks = repository.searchTracks("${artist.name} 2026", limit = 4)
+                                        releases.addAll(tracks)
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                            newReleasesFromFollowedArtists = releases.distinctBy { it.id }
+                        }
+                    } else {
+                        newReleasesFromFollowedArtists = emptyList()
+                    }
                 }
 
                 var storageSizeBytes by remember { mutableStateOf(0L) }
@@ -302,20 +332,9 @@ class MainActivity : ComponentActivity() {
 
                 // Воспроизведение случайного микса из сохраненных треков пользователя
                 fun playSavedRandom() {
-                    if (allSavedTracks.isNotEmpty()) {
-                        val domainList = allSavedTracks.shuffled().map { entity ->
-                            Track(
-                                id = entity.id,
-                                title = entity.title,
-                                artist = entity.artist,
-                                album = entity.album,
-                                duration = entity.duration,
-                                thumbnailUrl = entity.thumbnailUrl,
-                                isDownloaded = entity.isDownloaded,
-                                localFilePath = entity.localFilePath,
-                                isUserUploaded = entity.isUserUploaded
-                            )
-                        }
+                    val chain = if (sessionSavedRandomChain.isNotEmpty()) sessionSavedRandomChain else allSavedTracks.shuffled()
+                    if (chain.isNotEmpty()) {
+                        val domainList = chain.map { it.toDomain() }
                         playerManager.setQueueAndPlay(domainList, 0)
                     }
                 }
@@ -636,6 +655,24 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        // Экран артистов, на которых подписан пользователь
+                        isFollowedArtistsOpen -> {
+                            FollowedArtistsScreen(
+                                followedArtists = followedArtists,
+                                onBackClick = { isFollowedArtistsOpen = false },
+                                onArtistClick = { artist ->
+                                    isFollowedArtistsOpen = false
+                                    selectedArtistId = artist.channelId
+                                    selectedArtistName = artist.name
+                                },
+                                onUnfollowArtist = { channelId ->
+                                    coroutineScope.launch {
+                                        musicDao.unfollowArtist(channelId)
+                                    }
+                                }
+                            )
+                        }
+
                         // Вкладки нижнего меню
                         else -> {
                             when (currentTab) {
@@ -645,6 +682,8 @@ class MainActivity : ComponentActivity() {
                                         favoriteTracks = favoriteTracks,
                                         userPlaylistsCount = userPlaylists.size,
                                         allSavedTracks = allSavedTracks,
+                                        randomSavedPreviewTracks = sessionSavedRandomChain,
+                                        newReleasesFromFollowedArtists = newReleasesFromFollowedArtists,
                                         currentTrack = currentTrack,
                                         isPlaying = isPlaying,
                                         onTrackPlay = { track, queue ->
@@ -674,8 +713,11 @@ class MainActivity : ComponentActivity() {
                                     MyMusicScreen(
                                         userPlaylists = userPlaylists,
                                         favoriteTracks = favoriteTracks,
+                                        allLibraryTracks = allSavedTracks,
                                         uploadedTracksCount = userUploadedTracks.size,
                                         downloadedTracksCount = downloadedCount,
+                                        followedArtistsCount = followedArtists.size,
+                                        downloadProgressMap = downloadProgressMap,
                                         onOpenFavorites = { isFavoritesOpen = true },
                                         onPlayFavorites = { playFavorites(shuffle = false) },
                                         onOpenDownloaded = { isDownloadedOpen = true },
@@ -687,6 +729,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onOpenUploaded = { isUploadedOpen = true },
                                         onPlayUploaded = { playUploaded(shuffle = false) },
+                                        onOpenFollowedArtists = { isFollowedArtistsOpen = true },
                                         onOpenPlaylist = { plId -> selectedPlaylistId = plId },
                                         onCreatePlaylist = { name ->
                                             coroutineScope.launch {
@@ -707,7 +750,15 @@ class MainActivity : ComponentActivity() {
                                             coroutineScope.launch {
                                                 playlistRepository.updatePlaylistCover(plId, uri)
                                             }
-                                        }
+                                        },
+                                        onPlayTrack = { track, queue ->
+                                            playTrackInQueue(track, queue)
+                                        },
+                                        onToggleFavorite = { track -> toggleFavorite(track) },
+                                        onAddToPlaylist = { track -> trackForPlaylistSheet = track },
+                                        onDownloadTrack = { downloadManager.downloadTrack(it) },
+                                        currentTrack = currentTrack,
+                                        isPlaying = isPlaying
                                     )
                                 }
 
@@ -773,7 +824,8 @@ class MainActivity : ComponentActivity() {
                                         selectedPlaylistId == null &&
                                         !isFavoritesOpen &&
                                         !isDownloadedOpen &&
-                                        !isUploadedOpen
+                                        !isUploadedOpen &&
+                                        !isFollowedArtistsOpen
 
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -790,6 +842,7 @@ class MainActivity : ComponentActivity() {
                                             isFavoritesOpen = false
                                             isDownloadedOpen = false
                                             isUploadedOpen = false
+                                            isFollowedArtistsOpen = false
                                             currentTab = tab
                                         }
                                         .padding(horizontal = 14.dp, vertical = 6.dp)

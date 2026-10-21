@@ -1,6 +1,7 @@
 package com.blackfox.music.data.local
 
 import androidx.room.*
+import com.blackfox.music.domain.model.Track
 
 @Entity(tableName = "tracks")
 data class TrackEntity(
@@ -19,6 +20,31 @@ data class TrackEntity(
     val isFavorite: Boolean = false,
     val isUserUploaded: Boolean = false,
     val favoriteOrderPosition: Int = 0
+)
+
+fun TrackEntity.toDomain(): Track = Track(
+    id = id,
+    title = title,
+    artist = artist,
+    artistId = artistId,
+    album = album,
+    albumId = albumId,
+    duration = duration,
+    durationSeconds = durationSeconds,
+    thumbnailUrl = thumbnailUrl,
+    streamUrl = null,
+    isDownloaded = isDownloaded,
+    localFilePath = localFilePath,
+    isUserUploaded = isUserUploaded
+)
+
+@Entity(tableName = "followed_artists")
+data class ArtistEntity(
+    @PrimaryKey val channelId: String,
+    val name: String,
+    val thumbnailUrl: String = "",
+    val subscribers: String = "",
+    val followedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "playlists")

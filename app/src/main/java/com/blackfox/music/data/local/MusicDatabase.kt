@@ -14,9 +14,10 @@ import kotlinx.coroutines.launch
     entities = [
         TrackEntity::class,
         PlaylistEntity::class,
-        PlaylistTrackCrossRef::class
+        PlaylistTrackCrossRef::class,
+        ArtistEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class MusicDatabase : RoomDatabase() {
@@ -34,6 +35,21 @@ abstract class MusicDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `followed_artists` (
+                        `channelId` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `thumbnailUrl` TEXT NOT NULL DEFAULT '',
+                        `subscribers` TEXT NOT NULL DEFAULT '',
+                        `followedAt` INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(`channelId`)
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): MusicDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -41,7 +57,7 @@ abstract class MusicDatabase : RoomDatabase() {
                     MusicDatabase::class.java,
                     "black_fox_music.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration()
                     .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
