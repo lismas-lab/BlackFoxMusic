@@ -8,17 +8,20 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
-import com.blackfox.music.data.download.DownloadProgress
-import com.blackfox.music.data.download.DownloadStatus
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
@@ -30,12 +33,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.blackfox.music.data.download.DownloadProgress
+import com.blackfox.music.data.download.DownloadStatus
 import com.blackfox.music.domain.model.Album
 import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
@@ -51,8 +58,12 @@ fun GlassSearchBar(
     modifier: Modifier = Modifier,
     placeholder: String = "Поиск песен, альбомов, артистов...",
     suggestions: List<String> = emptyList(),
-    onSuggestionClick: (String) -> Unit = {}
+    onSuggestionClick: (String) -> Unit = {},
+    onSearchSubmitted: (() -> Unit)? = null
 ) {
+    val focusManager = LocalFocusManager.current
+    var isSuggestionsDismissed by remember { mutableStateOf(false) }
+
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -85,8 +96,19 @@ fun GlassSearchBar(
                     }
                     BasicTextField(
                         value = query,
-                        onValueChange = onQueryChange,
+                        onValueChange = {
+                            isSuggestionsDismissed = false
+                            onQueryChange(it)
+                        },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                isSuggestionsDismissed = true
+                                focusManager.clearFocus()
+                                onSearchSubmitted?.invoke()
+                            }
+                        ),
                         textStyle = TextStyle(
                             color = TextPrimary,
                             fontSize = 15.sp,
@@ -99,7 +121,10 @@ fun GlassSearchBar(
 
                 if (query.isNotEmpty()) {
                     IconButton(
-                        onClick = { onQueryChange("") },
+                        onClick = {
+                            isSuggestionsDismissed = true
+                            onQueryChange("")
+                        },
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(
@@ -113,8 +138,8 @@ fun GlassSearchBar(
             }
         }
 
-        // Всплывающее меню поисковых подсказок API
-        if (suggestions.isNotEmpty() && query.isNotBlank()) {
+        // Всплывающее меню поисковых подсказок API (исчезает при подтверждении ввода или клике)
+        if (!isSuggestionsDismissed && suggestions.isNotEmpty() && query.isNotBlank()) {
             Spacer(modifier = Modifier.height(8.dp))
             Column(
                 modifier = Modifier
@@ -127,7 +152,11 @@ fun GlassSearchBar(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable { onSuggestionClick(suggestion) }
+                            .clickable {
+                                isSuggestionsDismissed = true
+                                focusManager.clearFocus()
+                                onSuggestionClick(suggestion)
+                            }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -174,6 +203,9 @@ fun TrackListItem(
     downloadProgress: DownloadProgress? = null,
     isDownloaded: Boolean = track.isDownloaded,
     onArtistClick: ((artistName: String, artistId: String?) -> Unit)? = null,
+    showReorderHandle: Boolean = false,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val heartColor by animateColorAsState(
@@ -190,6 +222,18 @@ fun TrackListItem(
             .padding(vertical = 4.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Кнопка-манипулятор с тремя полосками слева от обложки для изменения порядка
+        if (showReorderHandle) {
+            Icon(
+                imageVector = Icons.Default.DragHandle,
+                contentDescription = "Перетащить",
+                tint = FoxOrange.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .size(26.dp)
+                    .padding(end = 6.dp)
+            )
+        }
+
         // Кликабельная зона информации о треке (обложка + название + артист)
         Row(
             modifier = Modifier
@@ -246,105 +290,137 @@ fun TrackListItem(
 
         Spacer(modifier = Modifier.width(4.dp))
 
-        // Кнопки действий с изолированными круглыми зонами нажатия
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            // Скачать для оффлайна с круговым индикатором прогресса
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        enabled = !isDownloading,
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(bounded = true, radius = 19.dp),
-                        onClick = onDownloadClick
-                    ),
-                contentAlignment = Alignment.Center
+        // Кнопки действий: при изменении порядка показываются стрелки перемещения, иначе действия
+        if (showReorderHandle && (onMoveUp != null || onMoveDown != null)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                if (isDownloading) {
-                    val percent = downloadProgress?.progressPercent ?: 0
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { if (percent > 0) percent / 100f else 0.15f },
-                            color = FoxOrange,
-                            trackColor = ObsidianCard,
-                            strokeWidth = 2.5.dp,
-                            modifier = Modifier.size(26.dp)
-                        )
-                        if (percent > 0) {
-                            Text(
-                                text = "$percent%",
-                                color = FoxOrange,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = "Загрузка",
-                                tint = FoxOrange,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-                    }
-                } else if (isCompleted) {
+                IconButton(
+                    onClick = { onMoveUp?.invoke() },
+                    enabled = onMoveUp != null,
+                    modifier = Modifier.size(36.dp)
+                ) {
                     Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Скачано",
-                        tint = FoxOrange,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Вверх",
+                        tint = if (onMoveUp != null) FoxOrange else TextMuted.copy(alpha = 0.3f),
+                        modifier = Modifier.size(22.dp)
                     )
-                } else {
+                }
+                IconButton(
+                    onClick = { onMoveDown?.invoke() },
+                    enabled = onMoveDown != null,
+                    modifier = Modifier.size(36.dp)
+                ) {
                     Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "Скачать",
-                        tint = TextMuted,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Вниз",
+                        tint = if (onMoveDown != null) FoxOrange else TextMuted.copy(alpha = 0.3f),
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
-
-            // 1-Click Лайк (Избранное)
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(bounded = true, radius = 19.dp),
-                        onClick = onFavoriteToggle
-                    ),
-                contentAlignment = Alignment.Center
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                    contentDescription = "В избранное",
-                    tint = heartColor,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+                // Скачать для оффлайна с круговым индикатором прогресса
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .clickable(
+                            enabled = !isDownloading,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = true, radius = 19.dp),
+                            onClick = onDownloadClick
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isDownloading) {
+                        val percent = downloadProgress?.progressPercent ?: 0
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(
+                                progress = { if (percent > 0) percent / 100f else 0.15f },
+                                color = FoxOrange,
+                                trackColor = ObsidianCard,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(26.dp)
+                            )
+                            if (percent > 0) {
+                                Text(
+                                    text = "$percent%",
+                                    color = FoxOrange,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Загрузка",
+                                    tint = FoxOrange,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                    } else if (isCompleted) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Скачано",
+                            tint = FoxOrange,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Скачать",
+                            tint = TextMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
 
-            // Кнопка быстрого добавления в плейлист
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(bounded = true, radius = 19.dp),
-                        onClick = onAddToPlaylistClick
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
-                    contentDescription = "В плейлист",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(21.dp)
-                )
+                // 1-Click Лайк (Избранное)
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = true, radius = 19.dp),
+                            onClick = onFavoriteToggle
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = "В избранное",
+                        tint = heartColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Кнопка быстрого добавления в плейлист
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = true, radius = 19.dp),
+                            onClick = onAddToPlaylistClick
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
+                        contentDescription = "В плейлист",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
             }
         }
     }
@@ -529,7 +605,7 @@ fun ArtistListItem(
         }
 
         Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = "Перейти к артисту",
             tint = TextMuted,
             modifier = Modifier.size(24.dp)
@@ -589,7 +665,7 @@ fun AlbumListItem(
         }
 
         Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = "Открыть альбом",
             tint = TextMuted,
             modifier = Modifier.size(24.dp)

@@ -375,106 +375,32 @@ fun PlaylistDetailScreen(
                 }
             } else {
                 itemsIndexed(tracks, key = { _, t -> t.id }) { index, entity ->
-                    if (isReorderMode) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp, horizontal = 12.dp)
-                                .liquidGlass(cornerRadius = 14.dp, backgroundColor = Color(0x14FFFFFF))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${index + 1}",
-                                color = FoxOrange,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                modifier = Modifier.width(26.dp)
-                            )
+                    val domainTrack = Track(
+                        id = entity.id,
+                        title = entity.title,
+                        artist = entity.artist,
+                        album = entity.album,
+                        duration = entity.duration,
+                        thumbnailUrl = entity.thumbnailUrl,
+                        isDownloaded = entity.isDownloaded,
+                        localFilePath = entity.localFilePath
+                    )
+                    val isFav = favoriteTrackIds.contains(entity.id)
+                    val progress = downloadProgressMap[entity.id]
 
-                            AsyncImage(
-                                model = entity.thumbnailUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(ObsidianCard)
-                            )
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = entity.title,
-                                    color = TextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = entity.artist,
-                                    color = TextSecondary,
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = { onMoveTrack(index, index - 1) },
-                                    enabled = index > 0,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowUp,
-                                        contentDescription = "Вверх",
-                                        tint = if (index > 0) FoxOrange else TextMuted.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { onMoveTrack(index, index + 1) },
-                                    enabled = index < tracks.lastIndex,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowDown,
-                                        contentDescription = "Вниз",
-                                        tint = if (index < tracks.lastIndex) FoxOrange else TextMuted.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        val domainTrack = Track(
-                            id = entity.id,
-                            title = entity.title,
-                            artist = entity.artist,
-                            album = entity.album,
-                            duration = entity.duration,
-                            thumbnailUrl = entity.thumbnailUrl,
-                            isDownloaded = entity.isDownloaded,
-                            localFilePath = entity.localFilePath
-                        )
-                        val isFav = favoriteTrackIds.contains(entity.id)
-                        val progress = downloadProgressMap[entity.id]
-
-                        TrackListItem(
-                            track = domainTrack,
-                            onTrackClick = { onTrackClick(domainTrack) },
-                            isFavorite = isFav,
-                            onFavoriteToggle = { onToggleFavorite(domainTrack) },
-                            onAddToPlaylistClick = { onRemoveTrack(entity.id) }, // используется для удаления
-                            onDownloadClick = { /* скачивание */ },
-                            downloadProgress = progress,
-                            isDownloaded = entity.isDownloaded
-                        )
-                    }
+                    TrackListItem(
+                        track = domainTrack,
+                        onTrackClick = { onTrackClick(domainTrack) },
+                        isFavorite = isFav,
+                        onFavoriteToggle = { onToggleFavorite(domainTrack) },
+                        onAddToPlaylistClick = { onRemoveTrack(entity.id) },
+                        onDownloadClick = { /* скачивание */ },
+                        downloadProgress = progress,
+                        isDownloaded = entity.isDownloaded,
+                        showReorderHandle = isReorderMode,
+                        onMoveUp = if (index > 0) { { onMoveTrack(index, index - 1) } } else null,
+                        onMoveDown = if (index < tracks.lastIndex) { { onMoveTrack(index, index + 1) } } else null
+                    )
                 }
             }
         }

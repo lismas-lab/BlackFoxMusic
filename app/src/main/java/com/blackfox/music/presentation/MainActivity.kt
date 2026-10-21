@@ -49,6 +49,7 @@ import com.blackfox.music.presentation.screens.home.HomeScreen
 import com.blackfox.music.presentation.screens.mymusic.FavoritesDetailScreen
 import com.blackfox.music.presentation.screens.mymusic.MyMusicScreen
 import com.blackfox.music.presentation.screens.mymusic.PlaylistDetailScreen
+import com.blackfox.music.presentation.screens.mymusic.UploadedTracksScreen
 import com.blackfox.music.presentation.screens.player.FullPlayerSheet
 import com.blackfox.music.presentation.screens.search.SearchViewModel
 import com.blackfox.music.presentation.screens.settings.SettingsScreen
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
                 var selectedArtistName by remember { mutableStateOf<String?>(null) }
                 var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
                 var isFavoritesOpen by remember { mutableStateOf(false) }
+                var isUploadedOpen by remember { mutableStateOf(false) }
                 var isFullPlayerVisible by remember { mutableStateOf(false) }
                 var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
 
@@ -113,7 +115,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(
                     enabled = isFullPlayerVisible || selectedAlbumBrowseId != null ||
                             selectedArtistId != null || selectedArtistName != null ||
-                            selectedPlaylistId != null || isFavoritesOpen || currentTab != MainTab.HOME
+                            selectedPlaylistId != null || isFavoritesOpen || isUploadedOpen || currentTab != MainTab.HOME
                 ) {
                     when {
                         isFullPlayerVisible -> isFullPlayerVisible = false
@@ -124,6 +126,7 @@ class MainActivity : ComponentActivity() {
                         }
                         selectedPlaylistId != null -> selectedPlaylistId = null
                         isFavoritesOpen -> isFavoritesOpen = false
+                        isUploadedOpen -> isUploadedOpen = false
                         currentTab != MainTab.HOME -> currentTab = MainTab.HOME
                     }
                 }
@@ -141,8 +144,27 @@ class MainActivity : ComponentActivity() {
                 val userPlaylists by playlistRepository.getAllUserPlaylists().collectAsState(initial = emptyList())
                 val favoriteTracks by musicDao.getFavoriteTracks().collectAsState(initial = emptyList())
                 val favoriteTrackIds by musicDao.getFavoriteTrackIds().collectAsState(initial = emptyList())
+                val userUploadedTracks by musicDao.getUserUploadedTracks().collectAsState(initial = emptyList())
                 val downloadedCount by musicDao.getDownloadedCount().collectAsState(initial = 0)
                 val favoriteSet = remember(favoriteTrackIds) { favoriteTrackIds.toSet() }
+
+                // Полная коллекция сохраненных треков (из плейлистов, любимого и загруженных)
+                val allSavedTracks = remember(userPlaylists, favoriteTracks, userUploadedTracks) {
+                    val set = mutableSetOf<String>()
+                    val result = mutableListOf<TrackEntity>()
+                    for (t in favoriteTracks) {
+                        if (set.add(t.id)) result.add(t)
+                    }
+                    for (t in userUploadedTracks) {
+                        if (set.add(t.id)) result.add(t)
+                    }
+                    for (pl in userPlaylists) {
+                        for (t in pl.tracks) {
+                            if (set.add(t.id)) result.add(t)
+                        }
+                    }
+                    result
+                }
 
                 var storageSizeBytes by remember { mutableStateOf(0L) }
                 LaunchedEffect(downloadProgressMap, downloadedCount) {
@@ -185,6 +207,85 @@ class MainActivity : ComponentActivity() {
                             // Автоматически скачиваем трек при добавлении в любимое
                             downloadManager.downloadTrack(track)
                         }
+                    }
+                }
+
+                // Перемещение трека в избранном
+                fun moveFavoriteTrack(fromIdx: Int, toIdx: Int) {
+                    if (fromIdx in favoriteTracks.indices && toIdx in favoriteTracks.indices) {
+                        coroutineScope.launch {
+                            val list = favoriteTracks.toMutableList()
+                            val moved = list.removeAt(fromIdx)
+                            list.add(toIdx, moved)
+                            list.forEachIndexed { index, track ->
+                                musicDao.updateFavoriteOrder(track.id, index)
+                            }
+                        }
+                    }
+                }
+
+                // Запуск бесконечного радиопотока Fox Flow (Моя волна)
+                fun startFoxFlow() {
+                    coroutineScope.launch {
+                        val seed = favoriteTracks.randomOrNull() ?: allSavedTracks.randomOrNull()
+                        val seedId = seed?.id ?: "dQw4w9WgXcQ"
+                        val radioQueue = repository.getRadioQueue(seedId)
+                        if (radioQueue.isNotEmpty()) {
+                            playerManager.setQueueAndPlay(radioQueue, 0)
+                        } else if (seed != null) {
+                            val fallback = Track(
+                                id = seed.id,
+                                title = seed.title,
+                                artist = seed.artist,
+                                album = seed.album,
+                                duration = seed.duration,
+                                thumbnailUrl = seed.thumbnailUrl,
+                                isDownloaded = seed.isDownloaded,
+                                localFilePath = seed.localFilePath
+                            )
+                            playerManager.setQueueAndPlay(listOf(fallback), 0)
+                        }
+                    }
+                }
+
+                // Воспроизведение случайного микса из сохраненных треков пользователя
+                fun playSavedRandom() {
+                    if (allSavedTracks.isNotEmpty()) {
+                        val domainList = allSavedTracks.shuffled().map { entity ->
+                            Track(
+                                id = entity.id,
+                                title = entity.title,
+                                artist = entity.artist,
+                                album = entity.album,
+                                duration = entity.duration,
+                                thumbnailUrl = entity.thumbnailUrl,
+                                isDownloaded = entity.isDownloaded,
+                                localFilePath = entity.localFilePath,
+                                isUserUploaded = entity.isUserUploaded
+                            )
+                        }
+                        playerManager.setQueueAndPlay(domainList, 0)
+                    }
+                }
+
+                // Воспроизведение загруженных пользователем файлов
+                fun playUploaded(shuffle: Boolean = false) {
+                    val domainList = userUploadedTracks.map { entity ->
+                        Track(
+                            id = entity.id,
+                            title = entity.title,
+                            artist = entity.artist,
+                            album = entity.album,
+                            duration = entity.duration,
+                            thumbnailUrl = entity.thumbnailUrl,
+                            isDownloaded = true,
+                            localFilePath = entity.localFilePath,
+                            isUserUploaded = true
+                        )
+                    }
+                    if (domainList.isNotEmpty()) {
+                        val queue = if (shuffle) domainList.shuffled() else domainList
+                        playerManager.setQueueAndPlay(queue, 0)
                     }
                 }
 
@@ -281,6 +382,10 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onAlbumClick = { album ->
                                     selectedAlbumBrowseId = album.browseId
+                                },
+                                onArtistClick = { artist ->
+                                    selectedArtistId = artist.channelId
+                                    selectedArtistName = artist.name
                                 },
                                 downloadProgressMap = downloadProgressMap
                             )
@@ -406,7 +511,25 @@ class MainActivity : ComponentActivity() {
                                 onPlayAll = { playFavorites(shuffle = false) },
                                 onShuffle = { playFavorites(shuffle = true) },
                                 onToggleFavorite = { track -> toggleFavorite(track) },
-                                onAddToPlaylistClick = { track -> trackForPlaylistSheet = track }
+                                onAddToPlaylistClick = { track -> trackForPlaylistSheet = track },
+                                onMoveTrack = { fromIdx, toIdx -> moveFavoriteTrack(fromIdx, toIdx) }
+                            )
+                        }
+
+                        // Экран Загруженных треков (Собственные файлы пользователя)
+                        isUploadedOpen -> {
+                            UploadedTracksScreen(
+                                uploadedTracks = userUploadedTracks,
+                                favoriteTrackIds = favoriteSet,
+                                musicDao = musicDao,
+                                playlistRepository = playlistRepository,
+                                onBackClick = { isUploadedOpen = false },
+                                onTrackClick = { track, queue ->
+                                    playTrackInQueue(track, queue)
+                                },
+                                onPlayAll = { playUploaded(shuffle = false) },
+                                onShuffle = { playUploaded(shuffle = true) },
+                                onToggleFavorite = { track -> toggleFavorite(track) }
                             )
                         }
 
@@ -418,6 +541,7 @@ class MainActivity : ComponentActivity() {
                                         viewModel = searchViewModel,
                                         favoriteTracks = favoriteTracks,
                                         userPlaylistsCount = userPlaylists.size,
+                                        allSavedTracks = allSavedTracks,
                                         onTrackPlay = { track, queue ->
                                             playTrackInQueue(track, queue)
                                         },
@@ -433,6 +557,8 @@ class MainActivity : ComponentActivity() {
                                             selectedArtistId = id
                                             selectedArtistName = name
                                         },
+                                        onStartFoxFlow = { startFoxFlow() },
+                                        onPlaySavedRandom = { playSavedRandom() },
                                         onNavigateToMyMusic = { currentTab = MainTab.MY_MUSIC },
                                         onNavigateToFavorites = { isFavoritesOpen = true },
                                         downloadProgressMap = downloadProgressMap
@@ -443,8 +569,11 @@ class MainActivity : ComponentActivity() {
                                     MyMusicScreen(
                                         userPlaylists = userPlaylists,
                                         favoriteTracks = favoriteTracks,
+                                        uploadedTracksCount = userUploadedTracks.size,
                                         onOpenFavorites = { isFavoritesOpen = true },
                                         onPlayFavorites = { playFavorites(shuffle = false) },
+                                        onOpenUploaded = { isUploadedOpen = true },
+                                        onPlayUploaded = { playUploaded(shuffle = false) },
                                         onOpenPlaylist = { plId -> selectedPlaylistId = plId },
                                         onCreatePlaylist = { name ->
                                             coroutineScope.launch {
@@ -523,7 +652,8 @@ class MainActivity : ComponentActivity() {
                                         selectedArtistId == null &&
                                         selectedArtistName == null &&
                                         selectedPlaylistId == null &&
-                                        !isFavoritesOpen
+                                        !isFavoritesOpen &&
+                                        !isUploadedOpen
 
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -535,6 +665,7 @@ class MainActivity : ComponentActivity() {
                                             selectedArtistName = null
                                             selectedPlaylistId = null
                                             isFavoritesOpen = false
+                                            isUploadedOpen = false
                                             currentTab = tab
                                         }
                                         .padding(horizontal = 14.dp, vertical = 6.dp)

@@ -16,7 +16,9 @@ data class TrackEntity(
     val localFilePath: String? = null,
     val isDownloaded: Boolean = false,
     val downloadedAt: Long? = null,
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val isUserUploaded: Boolean = false,
+    val favoriteOrderPosition: Int = 0
 )
 
 @Entity(tableName = "playlists")

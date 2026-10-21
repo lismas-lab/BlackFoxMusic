@@ -29,6 +29,8 @@ class ArtistViewModel(
 ) : ViewModel() {
 
     val uiState = MutableStateFlow(ArtistUiState(isLoading = true))
+    val allTracks = MutableStateFlow<List<Track>>(emptyList())
+    val isAllTracksLoading = MutableStateFlow(false)
 
     val playlists: StateFlow<List<PlaylistEntity>> = musicDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -62,6 +64,8 @@ class ArtistViewModel(
                 if (targetId.isNotBlank()) {
                     val artist = repository.getArtistDetails(targetId)
                     uiState.value = ArtistUiState(isLoading = false, artist = artist)
+                    // Фоновая предзагрузка всех песен артиста
+                    loadAllTracks(artist)
                 } else {
                     uiState.value = ArtistUiState(isLoading = false, error = "Информация об артисте не найдена")
                 }
@@ -70,6 +74,29 @@ class ArtistViewModel(
                     isLoading = false,
                     error = e.localizedMessage ?: "Не удалось загрузить данные артиста"
                 )
+            }
+        }
+    }
+
+    fun loadAllTracks(currentArtist: Artist? = uiState.value.artist) {
+        val a = currentArtist ?: uiState.value.artist ?: return
+        if (allTracks.value.isNotEmpty() || isAllTracksLoading.value) return
+
+        viewModelScope.launch {
+            isAllTracksLoading.value = true
+            try {
+                val list = repository.getArtistAllTracks(
+                    allSongsBrowseId = a.allSongsBrowseId ?: "",
+                    artistName = a.name,
+                    artistId = a.channelId
+                )
+                allTracks.value = if (list.isNotEmpty()) list else a.topTracks
+            } catch (e: Exception) {
+                if (allTracks.value.isEmpty()) {
+                    allTracks.value = a.topTracks
+                }
+            } finally {
+                isAllTracksLoading.value = false
             }
         }
     }

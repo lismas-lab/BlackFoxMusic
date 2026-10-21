@@ -38,7 +38,7 @@ interface MusicDao {
     @Query("SELECT id FROM tracks WHERE isFavorite = 1")
     fun getFavoriteTrackIds(): Flow<List<String>>
 
-    @Query("SELECT * FROM tracks WHERE isFavorite = 1 ORDER BY rowid DESC")
+    @Query("SELECT * FROM tracks WHERE isFavorite = 1 ORDER BY favoriteOrderPosition ASC, rowid DESC")
     fun getFavoriteTracks(): Flow<List<TrackEntity>>
 
     @Query("SELECT COUNT(*) FROM tracks WHERE isFavorite = 1")
@@ -46,6 +46,19 @@ interface MusicDao {
 
     @Query("UPDATE tracks SET isFavorite = :isFavorite WHERE id = :trackId")
     suspend fun updateFavorite(trackId: String, isFavorite: Boolean)
+
+    @Query("UPDATE tracks SET favoriteOrderPosition = :order WHERE id = :trackId")
+    suspend fun updateFavoriteOrder(trackId: String, order: Int)
+
+    @Query("SELECT MAX(favoriteOrderPosition) FROM tracks WHERE isFavorite = 1")
+    suspend fun getMaxFavoriteOrder(): Int?
+
+    // --- ЗАГРУЖЕННЫЕ ПОЛЬЗОВАТЕЛЕМ ТРЕКИ ---
+    @Query("SELECT * FROM tracks WHERE isUserUploaded = 1 ORDER BY rowid DESC")
+    fun getUserUploadedTracks(): Flow<List<TrackEntity>>
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE isUserUploaded = 1")
+    fun getUserUploadedCount(): Flow<Int>
 
     // --- ПЛЕЙЛИСТЫ ---
     @Insert(onConflict = OnConflictStrategy.REPLACE)

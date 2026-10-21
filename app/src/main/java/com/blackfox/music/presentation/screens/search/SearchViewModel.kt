@@ -42,6 +42,7 @@ class SearchViewModel(
     val selectedFilter = MutableStateFlow(SearchFilter.ALL)
     val uiState = MutableStateFlow(SearchUiState())
     val suggestions = MutableStateFlow<List<String>>(emptyList())
+    private var suppressNextSuggestions = false
 
     val playlists: StateFlow<List<PlaylistEntity>> = musicDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -65,6 +66,11 @@ class SearchViewModel(
 
         query.debounce(150)
             .onEach { q ->
+                if (suppressNextSuggestions) {
+                    suppressNextSuggestions = false
+                    suggestions.value = emptyList()
+                    return@onEach
+                }
                 if (q.trim().length >= 2) {
                     val list = repository.getSearchSuggestions(q.trim())
                     suggestions.value = list
@@ -76,6 +82,7 @@ class SearchViewModel(
     }
 
     fun onQueryChange(newQuery: String) {
+        suppressNextSuggestions = false
         query.value = newQuery
         if (newQuery.isBlank()) {
             uiState.value = SearchUiState()
@@ -84,6 +91,7 @@ class SearchViewModel(
     }
 
     fun onSuggestionSelect(suggestion: String) {
+        suppressNextSuggestions = true
         query.value = suggestion
         suggestions.value = emptyList()
         performSearch(suggestion, selectedFilter.value)

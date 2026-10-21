@@ -41,8 +41,11 @@ import java.io.File
 fun MyMusicScreen(
     userPlaylists: List<PlaylistWithTracks>,
     favoriteTracks: List<TrackEntity>,
+    uploadedTracksCount: Int = 0,
     onOpenFavorites: () -> Unit,
     onPlayFavorites: () -> Unit,
+    onOpenUploaded: () -> Unit = {},
+    onPlayUploaded: () -> Unit = {},
     onOpenPlaylist: (Long) -> Unit,
     onCreatePlaylist: (String) -> Unit,
     onRenamePlaylist: (Long, String) -> Unit,
@@ -190,6 +193,83 @@ fun MyMusicScreen(
                                         .clip(CircleShape)
                                         .background(FoxOrange)
                                         .clickable { onPlayFavorites() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Воспроизвести всё",
+                                        tint = ObsidianBlack,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Закрепленная карточка "Загруженные треки" (Собственные аудиофайлы пользователя)
+                item(span = { GridItemSpan(2) }) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .liquidGlass(
+                                cornerRadius = 22.dp,
+                                backgroundColor = Color(0x16FFFFFF),
+                                borderBrush = Brush.linearGradient(
+                                    listOf(FoxOrange.copy(alpha = 0.4f), Color.Transparent)
+                                )
+                            )
+                            .clickable { onOpenUploaded() }
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Иконка папки аудио в неоновом круге
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(FoxOrange.copy(alpha = 0.35f), Color(0x14FFFFFF))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = "Загруженные",
+                                    tint = FoxOrange,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Загруженные треки",
+                                    color = TextPrimary,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "$uploadedTracksCount треков • Ваши файлы",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
+
+                            if (uploadedTracksCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(FoxOrange)
+                                        .clickable { onPlayUploaded() },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(

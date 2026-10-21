@@ -12,7 +12,8 @@ data class Track(
     val thumbnailUrl: String = "",
     val streamUrl: String? = null,
     val isDownloaded: Boolean = false,
-    val localFilePath: String? = null
+    val localFilePath: String? = null,
+    val isUserUploaded: Boolean = false
 )
 
 data class Album(
@@ -32,7 +33,9 @@ data class Artist(
     val subscribers: String = "",
     val avatarUrl: String = "",
     val topTracks: List<Track> = emptyList(),
-    val albums: List<Album> = emptyList()
+    val albums: List<Album> = emptyList(),
+    val similarArtists: List<Artist> = emptyList(),
+    val allSongsBrowseId: String? = null
 )
 
 data class Playlist(

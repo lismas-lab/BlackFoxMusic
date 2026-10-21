@@ -10,8 +10,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,9 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.domain.model.Album
@@ -37,11 +42,14 @@ fun HomeScreen(
     viewModel: SearchViewModel,
     favoriteTracks: List<TrackEntity>,
     userPlaylistsCount: Int,
+    allSavedTracks: List<TrackEntity> = emptyList(),
     onTrackPlay: (track: Track, queue: List<Track>) -> Unit,
     onPlayFavorites: () -> Unit,
     onAlbumClick: (Album) -> Unit,
     onArtistClick: (Artist) -> Unit,
     onArtistNameClick: (String, String?) -> Unit,
+    onStartFoxFlow: () -> Unit = {},
+    onPlaySavedRandom: () -> Unit = {},
     onNavigateToMyMusic: () -> Unit,
     onNavigateToFavorites: () -> Unit,
     downloadProgressMap: Map<String, DownloadProgress> = emptyMap(),
@@ -154,6 +162,99 @@ fun HomeScreen(
             ) {
                 // ЕСЛИ ПОИСК ПУСТОЙ -> ПОКАЗЫВАЕМ БЛОКИ ГЛАВНОГО ЭКРАНА
                 if (query.isBlank()) {
+                    // Баннер «Fox Flow» (Моя волна)
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .liquidGlass(
+                                    cornerRadius = 24.dp,
+                                    backgroundColor = Color(0x18FFFFFF),
+                                    borderBrush = Brush.linearGradient(
+                                        listOf(FoxOrange.copy(alpha = 0.85f), FoxOrange.copy(alpha = 0.15f))
+                                    )
+                                )
+                                .clickable { onStartFoxFlow() }
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(
+                                            Brush.radialGradient(
+                                                listOf(FoxOrange, FoxOrange.copy(alpha = 0.35f))
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GraphicEq,
+                                        contentDescription = "Fox Flow",
+                                        tint = ObsidianBlack,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Fox Flow",
+                                            color = TextPrimary,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(FoxOrange.copy(alpha = 0.25f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Моя волна",
+                                                color = FoxOrange,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Умный бесконечный поток на основе любимой музыки",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(FoxOrange)
+                                        .clickable { onStartFoxFlow() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Запустить",
+                                        tint = ObsidianBlack,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         // Виджеты быстрого доступа (Любимое + Моя музыка)
                         Row(
@@ -267,6 +368,122 @@ fun HomeScreen(
                                         color = TextSecondary,
                                         fontSize = 12.sp
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    // Баннер "Случайное из сохраненного" (отображает 3 первых трека из цепочки)
+                    if (allSavedTracks.isNotEmpty()) {
+                        item {
+                            val firstThree = remember(allSavedTracks) { allSavedTracks.shuffled().take(3) }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .liquidGlass(cornerRadius = 22.dp, backgroundColor = Color(0x16FFFFFF))
+                                    .clickable { onPlaySavedRandom() }
+                                    .padding(16.dp)
+                            ) {
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(FoxOrange.copy(alpha = 0.2f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Shuffle,
+                                                    contentDescription = null,
+                                                    tint = FoxOrange,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column {
+                                                Text(
+                                                    text = "Случайное из сохраненного",
+                                                    color = TextPrimary,
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = "${allSavedTracks.size} треков в вашей коллекции",
+                                                    color = TextSecondary,
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                                .background(FoxOrange)
+                                                .clickable { onPlaySavedRandom() },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = "Слушать микс",
+                                                tint = ObsidianBlack,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // 3 первых трека из цепочки с мини-обложками и названиями
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        firstThree.forEach { track ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0x14FFFFFF))
+                                                    .padding(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                AsyncImage(
+                                                    model = track.thumbnailUrl,
+                                                    contentDescription = null,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier
+                                                        .size(34.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(ObsidianCard)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = track.title,
+                                                        color = TextPrimary,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = track.artist,
+                                                        color = TextSecondary,
+                                                        fontSize = 10.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
