@@ -8,9 +8,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +31,8 @@ import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Полноэкранный плеер в стиле Liquid Glass с текстами песен и переходом к артисту
@@ -50,6 +53,7 @@ fun FullPlayerSheet(
     onAddToPlaylistClick: () -> Unit,
     onCloseClick: () -> Unit,
     onArtistClick: (artistName: String, artistId: String?) -> Unit = { _, _ -> },
+    onAlbumClick: (albumTitle: String, albumId: String?) -> Unit = { _, _ -> },
     repository: InnerTubeRepository = remember { InnerTubeRepository() },
     modifier: Modifier = Modifier
 ) {
@@ -58,6 +62,39 @@ fun FullPlayerSheet(
     var lyricsPair by remember { mutableStateOf<Pair<String, String>?>(null) }
     var isLyricsLoading by remember { mutableStateOf(false) }
     var lyricsLoadedTrackId by remember { mutableStateOf<String?>(null) }
+
+    var resolvedAlbumId by remember(track.id) { mutableStateOf(track.albumId) }
+    var resolvedAlbumTitle by remember(track.id) { mutableStateOf(track.album) }
+    var isResolvingAlbum by remember(track.id) { mutableStateOf(false) }
+
+    LaunchedEffect(track.id) {
+        resolvedAlbumId = track.albumId
+        resolvedAlbumTitle = track.album
+        if (resolvedAlbumId == null) {
+            val query = if (!track.album.isNullOrBlank()) {
+                "${track.artist} ${track.album}"
+            } else if (track.artist.isNotBlank() && track.title.isNotBlank()) {
+                "${track.artist} ${track.title}"
+            } else null
+
+            if (query != null) {
+                isResolvingAlbum = true
+                try {
+                    val albums = repository.searchAlbums(query, limit = 1)
+                    if (albums.isNotEmpty()) {
+                        val first = albums.first()
+                        resolvedAlbumId = first.browseId
+                        if (resolvedAlbumTitle.isNullOrBlank()) {
+                            resolvedAlbumTitle = first.title
+                        }
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    isResolvingAlbum = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(track.id, isLyricsMode) {
         if (isLyricsMode && lyricsLoadedTrackId != track.id) {
@@ -160,7 +197,7 @@ fun FullPlayerSheet(
 
                 IconButton(onClick = onAddToPlaylistClick) {
                     Icon(
-                        imageVector = Icons.Outlined.PlaylistAdd,
+                        imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
                         contentDescription = "В плейлист",
                         tint = TextPrimary,
                         modifier = Modifier.size(24.dp)
@@ -290,6 +327,46 @@ fun FullPlayerSheet(
                             tint = accentColor,
                             modifier = Modifier.size(16.dp)
                         )
+                    }
+
+                    // Кликабельный альбом (переход к альбому из карточки трека)
+                    val albumToShow = resolvedAlbumTitle?.takeIf { it.isNotBlank() } ?: track.album?.takeIf { it.isNotBlank() }
+                    if (albumToShow != null || resolvedAlbumId != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    onCloseClick()
+                                    onAlbumClick(albumToShow ?: "", resolvedAlbumId)
+                                }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Album,
+                                contentDescription = "К альбому",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = albumToShow ?: "Альбом",
+                                color = TextSecondary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = TextMuted,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
 

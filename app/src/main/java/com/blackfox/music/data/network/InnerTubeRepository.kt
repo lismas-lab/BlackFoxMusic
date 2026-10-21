@@ -43,7 +43,7 @@ class InnerTubeRepository {
         val contextJson = JSONObject().apply {
             put("client", JSONObject().apply {
                 put("clientName", "WEB_REMIX")
-                put("clientVersion", "1.20240101.01.00")
+                put("clientVersion", "1.20241021.01.00")
                 put("hl", "ru")
                 put("gl", "US")
             })
@@ -111,6 +111,7 @@ class InnerTubeRepository {
                 var artist = "Unknown"
                 var artistId: String? = null
                 var album: String? = null
+                var albumId: String? = null
                 var duration = ""
 
                 val runTexts = mutableListOf<String>()
@@ -120,13 +121,14 @@ class InnerTubeRepository {
                     if (t != " • " && t.isNotBlank()) {
                         runTexts.add(t)
                     }
-                    if (artistId == null) {
-                        val bId = runObj.optJSONObject("navigationEndpoint")
-                            ?.optJSONObject("browseEndpoint")
-                            ?.optString("browseId")
-                        if (!bId.isNullOrBlank() && bId.startsWith("UC")) {
-                            artistId = bId
-                        }
+                    val bId = runObj.optJSONObject("navigationEndpoint")
+                        ?.optJSONObject("browseEndpoint")
+                        ?.optString("browseId")
+                    if (artistId == null && !bId.isNullOrBlank() && bId.startsWith("UC")) {
+                        artistId = bId
+                    }
+                    if (albumId == null && !bId.isNullOrBlank() && (bId.startsWith("MPREb_") || bId.startsWith("FEmusic_library_privately_owned_release_detail"))) {
+                        albumId = bId
                     }
                 }
 
@@ -166,6 +168,7 @@ class InnerTubeRepository {
                             artist = artist,
                             artistId = artistId,
                             album = album,
+                            albumId = albumId,
                             duration = duration,
                             thumbnailUrl = cleanThumbnail(rawThumb, 1080)
                         )
@@ -287,6 +290,7 @@ class InnerTubeRepository {
         val tracks = mutableListOf<Track>()
 
         val tc = response.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")
+            ?: response.optJSONObject("contents")?.optJSONObject("singleColumnBrowseResultsRenderer")
         if (tc != null) {
             val tabs = tc.optJSONArray("tabs")
             val firstTabContents = tabs?.optJSONObject(0)
@@ -300,11 +304,12 @@ class InnerTubeRepository {
                 if (header != null) {
                     albumTitle = header.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text", albumTitle) ?: albumTitle
                     val subRuns = header.optJSONObject("subtitle")?.optJSONArray("runs") ?: JSONArray()
-                    val yearPattern = Pattern.compile("^\\d{4}$")
+                    val yearPattern = Pattern.compile("\\b(19\\d{2}|20\\d{2})\\b")
                     for (i in 0 until subRuns.length()) {
                         val txt = subRuns.getJSONObject(i).optString("text", "")
+                        val m = yearPattern.matcher(txt)
                         when {
-                            yearPattern.matcher(txt).matches() -> year = txt
+                            m.find() -> year = m.group(1) ?: txt
                             txt !in listOf(" • ", "Альбом", "Сингл", "EP", "Album", "Single") && txt.isNotBlank() -> artist = txt
                         }
                     }
@@ -321,7 +326,9 @@ class InnerTubeRepository {
             // Треклист
             val secContents = tc.optJSONObject("secondaryContents")
                 ?.optJSONObject("sectionListRenderer")
-                ?.optJSONArray("contents") ?: JSONArray()
+                ?.optJSONArray("contents")
+                ?: firstTabContents
+                ?: JSONArray()
 
             for (i in 0 until secContents.length()) {
                 val shelf = secContents.getJSONObject(i).optJSONObject("musicShelfRenderer") ?: continue
@@ -361,6 +368,7 @@ class InnerTubeRepository {
                             title = trackTitle,
                             artist = artist,
                             album = albumTitle,
+                            albumId = browseId,
                             duration = duration,
                             thumbnailUrl = cover
                         )
@@ -549,10 +557,18 @@ class InnerTubeRepository {
                             .optJSONArray("runs") ?: JSONArray()
                     } else JSONArray()
 
+                    var albumId: String? = null
                     val runTexts = mutableListOf<String>()
                     for (k in 0 until detailsRuns.length()) {
-                        val t = detailsRuns.getJSONObject(k).optString("text", "")
+                        val runObj = detailsRuns.getJSONObject(k)
+                        val t = runObj.optString("text", "")
                         if (t != " • " && t.isNotBlank()) runTexts.add(t)
+                        val bId = runObj.optJSONObject("navigationEndpoint")
+                            ?.optJSONObject("browseEndpoint")
+                            ?.optString("browseId")
+                        if (albumId == null && !bId.isNullOrBlank() && (bId.startsWith("MPREb_") || bId.startsWith("FEmusic_library_privately_owned_release_detail"))) {
+                            albumId = bId
+                        }
                     }
                     if (runTexts.size >= 2) {
                         albumTitle = runTexts[1]
@@ -592,6 +608,7 @@ class InnerTubeRepository {
                                 artist = artistName,
                                 artistId = channelId,
                                 album = albumTitle,
+                                albumId = albumId,
                                 duration = duration,
                                 thumbnailUrl = cleanThumbnail(rawThumb, 720)
                             )
@@ -663,9 +680,13 @@ class InnerTubeRepository {
                         var year = ""
                         val albumType = if (carouselTitle.contains("Single", ignoreCase = true) || carouselTitle.contains("Сингл", ignoreCase = true)) "Сингл" else "Альбом"
                         val subRuns = twoRow.optJSONObject("subtitle")?.optJSONArray("runs") ?: JSONArray()
+                        val yearRegex = Regex("\\b(19\\d{2}|20\\d{2})\\b")
                         for (k in 0 until subRuns.length()) {
                             val st = subRuns.getJSONObject(k).optString("text", "")
-                            if (st.matches(Regex("^\\d{4}$"))) year = st
+                            val match = yearRegex.find(st)
+                            if (match != null) {
+                                year = match.value
+                            }
                         }
 
                         val thumbs = twoRow.optJSONObject("thumbnailRenderer")
@@ -704,6 +725,66 @@ class InnerTubeRepository {
             allSongsBrowseId = allSongsBrowseId,
             allSongsParams = allSongsParams
         )
+    }
+
+    /**
+     * Получение действительно новых релизов артиста (свежих синглов и последних альбомов) из API
+     */
+    suspend fun getArtistNewReleases(channelId: String, artistName: String): List<Track> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<Track>()
+        val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        try {
+            val details = getArtistDetails(channelId)
+
+            val singles = details.albums.filter {
+                it.type.equals("Сингл", ignoreCase = true) ||
+                it.type.equals("EP", ignoreCase = true) ||
+                it.type.contains("Single", ignoreCase = true)
+            }
+            val albums = details.albums.filter {
+                it.type.equals("Альбом", ignoreCase = true) ||
+                it.type.contains("Album", ignoreCase = true)
+            }
+
+            val candidateReleases = mutableListOf<Album>()
+            // В YouTube Music синглы и альбомы расположены в хронологическом порядке (сначала новые)
+            candidateReleases.addAll(singles.take(2))
+            candidateReleases.addAll(albums.take(1))
+
+            if (candidateReleases.isEmpty()) {
+                candidateReleases.addAll(details.albums.take(2))
+            }
+
+            for (rel in candidateReleases.take(3)) {
+                val relYear = rel.year.toIntOrNull() ?: 0
+                // Если у самого релиза уже спарсен старый год (< currentYear - 1), пропускаем
+                if (relYear in 1 until (currentYear - 1)) {
+                    continue
+                }
+
+                try {
+                    val albumData = getAlbumDetails(rel.browseId)
+                    val albumYear = albumData.year.toIntOrNull() ?: relYear
+                    // Если релиз вышел более года назад, не считаем его свежей новинкой
+                    if (albumYear in 1 until (currentYear - 1)) {
+                        continue
+                    }
+
+                    for (tr in albumData.tracks.take(2)) {
+                        result.add(
+                            tr.copy(
+                                artist = if (tr.artist.isBlank() || tr.artist == "Unknown Artist") artistName else tr.artist,
+                                artistId = channelId,
+                                album = rel.title,
+                                albumId = rel.browseId
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+
+        result.distinctBy { it.id }.take(6)
     }
 
     suspend fun getArtistAllTracks(
@@ -948,10 +1029,18 @@ class InnerTubeRepository {
                 .optJSONArray("runs") ?: JSONArray()
         } else JSONArray()
 
+        var albumId: String? = null
         val runTexts = mutableListOf<String>()
         for (k in 0 until detailsRuns.length()) {
-            val t = detailsRuns.getJSONObject(k).optString("text", "")
+            val runObj = detailsRuns.getJSONObject(k)
+            val t = runObj.optString("text", "")
             if (t != " • " && t.isNotBlank()) runTexts.add(t)
+            val bId = runObj.optJSONObject("navigationEndpoint")
+                ?.optJSONObject("browseEndpoint")
+                ?.optString("browseId")
+            if (albumId == null && !bId.isNullOrBlank() && (bId.startsWith("MPREb_") || bId.startsWith("FEmusic_library_privately_owned_release_detail"))) {
+                albumId = bId
+            }
         }
         if (runTexts.size >= 2) {
             albumTitle = runTexts[1]
@@ -998,6 +1087,7 @@ class InnerTubeRepository {
             artist = defaultArtist,
             artistId = artistId,
             album = albumTitle,
+            albumId = albumId,
             duration = duration,
             thumbnailUrl = cleanThumbnail(rawThumb, 720)
         )

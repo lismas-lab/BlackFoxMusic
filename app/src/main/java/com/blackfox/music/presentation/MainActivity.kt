@@ -191,23 +191,18 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Новинки артистов, на которых подписан пользователь
+                // Новинки артистов, на которых подписан пользователь (реальные свежие релизы из API)
                 var newReleasesFromFollowedArtists by remember { mutableStateOf<List<Track>>(emptyList()) }
                 LaunchedEffect(followedArtists) {
                     if (followedArtists.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
                             val releases = mutableListOf<Track>()
-                            val sampleArtists = followedArtists.take(5)
+                            val sampleArtists = followedArtists.take(6)
                             for (artist in sampleArtists) {
                                 try {
-                                    val details = repository.getArtistDetails(artist.channelId)
-                                    releases.addAll(details.topTracks.take(4))
-                                } catch (e: Exception) {
-                                    try {
-                                        val tracks = repository.searchTracks("${artist.name} 2026", limit = 4)
-                                        releases.addAll(tracks)
-                                    } catch (_: Exception) {}
-                                }
+                                    val newTracks = repository.getArtistNewReleases(artist.channelId, artist.name)
+                                    releases.addAll(newTracks.take(3))
+                                } catch (_: Exception) {}
                             }
                             newReleasesFromFollowedArtists = releases.distinctBy { it.id }
                         }
@@ -889,8 +884,29 @@ class MainActivity : ComponentActivity() {
                                 onCloseClick = { isFullPlayerVisible = false },
                                 onArtistClick = { name, id ->
                                     isFullPlayerVisible = false
+                                    selectedAlbumBrowseId = null
                                     selectedArtistId = id
                                     selectedArtistName = name
+                                },
+                                onAlbumClick = { albumTitle, albumId ->
+                                    isFullPlayerVisible = false
+                                    if (!albumId.isNullOrBlank()) {
+                                        selectedAlbumBrowseId = albumId
+                                    } else {
+                                        coroutineScope.launch {
+                                            try {
+                                                val query = if (albumTitle.isNotBlank() && !albumTitle.equals("Single", ignoreCase = true) && !albumTitle.equals("Сингл", ignoreCase = true)) {
+                                                    "${track.artist} $albumTitle"
+                                                } else {
+                                                    "${track.artist} ${track.title}"
+                                                }
+                                                val albums = repository.searchAlbums(query, limit = 1)
+                                                if (albums.isNotEmpty()) {
+                                                    selectedAlbumBrowseId = albums.first().browseId
+                                                }
+                                            } catch (_: Exception) {}
+                                        }
+                                    }
                                 },
                                 repository = repository
                             )
