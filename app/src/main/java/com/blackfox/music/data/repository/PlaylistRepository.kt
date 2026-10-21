@@ -185,6 +185,16 @@ class PlaylistRepository(
         }
     }
 
+    suspend fun clearAllExceptUserUploaded() = withContext(Dispatchers.IO) {
+        val nonUploaded = musicDao.getAllNonUploadedTracks()
+        for (track in nonUploaded) {
+            downloadManager.deleteDownloadedTrack(track.id)
+        }
+        musicDao.deleteAllUserPlaylists()
+        musicDao.deleteNonUploadedTracks()
+        musicDao.clearFavoritesForUploadedTracks()
+    }
+
     private fun saveCustomCover(playlistId: Long, uri: Uri): String? {
         return try {
             val dir = File(context.filesDir, "playlist_covers")

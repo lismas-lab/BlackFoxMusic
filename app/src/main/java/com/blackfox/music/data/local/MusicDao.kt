@@ -73,6 +73,18 @@ interface MusicDao {
     @Query("SELECT COUNT(*) FROM tracks WHERE isUserUploaded = 1")
     fun getUserUploadedCount(): Flow<Int>
 
+    @Query("SELECT * FROM tracks WHERE isUserUploaded = 0")
+    suspend fun getAllNonUploadedTracks(): List<TrackEntity>
+
+    @Query("DELETE FROM tracks WHERE isUserUploaded = 0")
+    suspend fun deleteNonUploadedTracks()
+
+    @Query("DELETE FROM playlists WHERE isFavoriteSystem = 0")
+    suspend fun deleteAllUserPlaylists()
+
+    @Query("UPDATE tracks SET isFavorite = 0, favoriteOrderPosition = 0 WHERE isUserUploaded = 1")
+    suspend fun clearFavoritesForUploadedTracks()
+
     // --- ПЛЕЙЛИСТЫ ---
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long

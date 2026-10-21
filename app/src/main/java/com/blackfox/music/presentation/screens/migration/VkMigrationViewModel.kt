@@ -6,6 +6,7 @@ import com.blackfox.music.data.download.AudioDownloadManager
 import com.blackfox.music.data.download.DownloadStatus
 import com.blackfox.music.data.local.ArtistEntity
 import com.blackfox.music.data.local.MusicDao
+import com.blackfox.music.data.local.PlaylistTrackCrossRef
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.local.toDomain
 import com.blackfox.music.data.network.InnerTubeRepository
@@ -19,42 +20,74 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-sealed class MigrationUiState {
-    object Idle : MigrationUiState()
+/**
+ * Элемент для экрана сопоставления треков
+ */
+data class MigrationReviewItem(
+    val vkTrack: VkTrack,
+    val matchedTrack: Track?,
+    val isFavorite: Boolean,
+    val targetPlaylists: List<String>
+)
 
-    data class LoadingMetadata(val message: String) : MigrationUiState()
+sealed interface MigrationUiState {
+    data object Idle : MigrationUiState
 
-    data class MigratingTracks(
+    data class LoadingMetadata(val message: String) : MigrationUiState
+
+    // Экран подтверждения перед запуском сопоставления
+    data class ConfirmMigration(
+        val rawVkInput: String,
+        val userId: Long,
+        val totalUniqueTracks: Int,
+        val favoritesCount: Int,
+        val playlists: List<VkPlaylist>,
+        val isDownloadRequested: Boolean,
+        val isClearTracksRequested: Boolean
+    ) : MigrationUiState
+
+    // Круговой индикатор при автоматическом сопоставлении
+    data class MatchingTracks(
         val current: Int,
         val total: Int,
         val currentTrackName: String,
+        val progressPercent: Float,
         val matchedCount: Int,
         val unmatchedCount: Int
-    ) : MigrationUiState()
+    ) : MigrationUiState
 
+    // Интерактивная таблица сопоставления
+    data class ReviewMatching(
+        val items: List<MigrationReviewItem>,
+        val isDownloadRequested: Boolean,
+        val isClearTracksRequested: Boolean
+    ) : MigrationUiState
+
+    data class SavingToDatabase(val message: String) : MigrationUiState
+
+    data class SubscribingArtists(val message: String) : MigrationUiState
+
+    // Круговой индикатор при скачивании
     data class DownloadingTracks(
         val current: Int,
         val total: Int,
-        val currentTrackName: String
-    ) : MigrationUiState()
-
-    data class SubscribingArtists(
-        val message: String
-    ) : MigrationUiState()
+        val currentTrackName: String,
+        val progressPercent: Float
+    ) : MigrationUiState
 
     data class Completed(
-        val totalVkTracks: Int,
-        val successfullyMatched: Int,
+        val totalProcessed: Int,
+        val matchedTracks: Int,
+        val unmatchedTracks: Int,
+        val downloadedTracks: Int,
         val playlistsCreated: Int,
-        val downloadedCount: Int,
-        val subscribedArtists: List<String>
-    ) : MigrationUiState()
+        val artistsSubscribed: List<String>
+    ) : MigrationUiState
 
-    data class Error(val message: String) : MigrationUiState()
+    data class Error(val message: String) : MigrationUiState
 }
 
 class VkMigrationViewModel(
@@ -68,10 +101,14 @@ class VkMigrationViewModel(
     private val _uiState = MutableStateFlow<MigrationUiState>(MigrationUiState.Idle)
     val uiState: StateFlow<MigrationUiState> = _uiState.asStateFlow()
 
+    private var cachedFavoriteVkTracks: List<VkTrack> = emptyList()
+    private var cachedVkPlaylists: List<VkPlaylist> = emptyList()
     private var shouldSkipDownloading = false
 
     fun reset() {
         _uiState.value = MigrationUiState.Idle
+        cachedFavoriteVkTracks = emptyList()
+        cachedVkPlaylists = emptyList()
         shouldSkipDownloading = false
     }
 
@@ -79,10 +116,14 @@ class VkMigrationViewModel(
         shouldSkipDownloading = true
     }
 
-    fun startMigration(
+    /**
+     * Шаг 1: Загрузка метаданных из VK и открытие окна подтверждения
+     */
+    fun prepareMigration(
         rawVkInput: String,
         isOpenConfirmed: Boolean,
-        isDownloadRequested: Boolean
+        isDownloadRequested: Boolean,
+        isClearTracksRequested: Boolean
     ) {
         if (!isOpenConfirmed) {
             _uiState.value = MigrationUiState.Error("Подтвердите, что ваш профиль и аудиозаписи в VK открыты для всех")
@@ -97,100 +138,173 @@ class VkMigrationViewModel(
 
         viewModelScope.launch {
             try {
-                // 1. Определение числового user_id
                 _uiState.value = MigrationUiState.LoadingMetadata("Определение пользователя VK...")
                 val userId = vkRepository.resolveUserId(cleaned).getOrElse { err ->
-                    _uiState.value = MigrationUiState.Error(err.message ?: "Не удалось определить ID пользователя")
+                    _uiState.value = MigrationUiState.Error(err.message ?: "Не удалось определить ID пользователя VK")
                     return@launch
                 }
 
-                // 2. Получение списка избранных аудиозаписей
                 _uiState.value = MigrationUiState.LoadingMetadata("Получение аудиозаписей из VK...")
                 val favoriteVkTracks = vkRepository.fetchFavoriteAudios(userId).getOrElse { err ->
                     _uiState.value = MigrationUiState.Error(err.message ?: "Не удалось загрузить аудиозаписи. Проверьте открытость аудиозаписей в профиле VK.")
                     return@launch
                 }
 
-                // 3. Получение пользовательских плейлистов
-                _uiState.value = MigrationUiState.LoadingMetadata("Проверка плейлистов VK...")
+                _uiState.value = MigrationUiState.LoadingMetadata("Поиск плейлистов VK...")
                 val vkPlaylists = vkRepository.fetchPlaylistsWithTracks(userId).getOrDefault(emptyList())
 
-                // Считаем общее число уникальных треков для переноса
-                val allVkTracksMap = mutableMapOf<Long, VkTrack>()
-                favoriteVkTracks.forEach { allVkTracksMap[it.id] = it }
-                vkPlaylists.forEach { pl -> pl.tracks.forEach { allVkTracksMap[it.id] = it } }
+                cachedFavoriteVkTracks = favoriteVkTracks
+                cachedVkPlaylists = vkPlaylists
 
-                val totalTracksToMigrate = allVkTracksMap.size
-                if (totalTracksToMigrate == 0) {
+                val uniqueVkTracksMap = mutableMapOf<Long, VkTrack>()
+                favoriteVkTracks.forEach { uniqueVkTracksMap[it.id] = it }
+                vkPlaylists.forEach { pl -> pl.tracks.forEach { uniqueVkTracksMap[it.id] = it } }
+
+                if (uniqueVkTracksMap.isEmpty()) {
                     _uiState.value = MigrationUiState.Error("В вашем профиле VK не найдено ни одного трека. Убедитесь, что аудиозаписи открыты.")
                     return@launch
                 }
 
-                // 4. Поиск и сопоставление треков через InnerTube и сохранение в базу
-                val matchedTracksList = mutableListOf<Track>()
-                var currentProcessed = 0
-                var matchedCount = 0
-                var unmatchedCount = 0
+                _uiState.value = MigrationUiState.ConfirmMigration(
+                    rawVkInput = rawVkInput,
+                    userId = userId,
+                    totalUniqueTracks = uniqueVkTracksMap.size,
+                    favoritesCount = favoriteVkTracks.size,
+                    playlists = vkPlaylists,
+                    isDownloadRequested = isDownloadRequested,
+                    isClearTracksRequested = isClearTracksRequested
+                )
 
-                val vkIdToMatchedTrack = mutableMapOf<Long, Track>()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.value = MigrationUiState.Error(e.message ?: "Ошибка при обращении к серверам VK")
+            }
+        }
+    }
 
-                // Миграция каждого уникального трека
-                for (vkTrack in allVkTracksMap.values) {
-                    currentProcessed++
-                    val trackLabel = "${vkTrack.artist} — ${vkTrack.title}"
-                    _uiState.value = MigrationUiState.MigratingTracks(
-                        current = currentProcessed,
-                        total = totalTracksToMigrate,
-                        currentTrackName = trackLabel,
-                        matchedCount = matchedCount,
-                        unmatchedCount = unmatchedCount
-                    )
+    /**
+     * Шаг 2: Запуск автоматического поиска и сопоставления треков
+     */
+    fun startMatchingAfterConfirmation(
+        isDownloadRequested: Boolean,
+        isClearTracksRequested: Boolean
+    ) {
+        viewModelScope.launch {
+            val favTracks = cachedFavoriteVkTracks
+            val playlists = cachedVkPlaylists
 
-                    // Небольшая задержка, чтобы не спамить API InnerTube
-                    delay(40)
+            val uniqueMap = linkedMapOf<Long, VkTrack>()
+            favTracks.forEach { uniqueMap[it.id] = it }
+            playlists.forEach { pl -> pl.tracks.forEach { uniqueMap[it.id] = it } }
 
-                    val matchedTrack = matchVkTrack(vkTrack)
-                    if (matchedTrack != null) {
-                        matchedCount++
-                        vkIdToMatchedTrack[vkTrack.id] = matchedTrack
-                        matchedTracksList.add(matchedTrack)
-                    } else {
-                        unmatchedCount++
-                    }
+            val total = uniqueMap.size
+            var current = 0
+            var matchedCount = 0
+            var unmatchedCount = 0
+
+            val reviewItems = mutableListOf<MigrationReviewItem>()
+
+            for (vkTrack in uniqueMap.values) {
+                current++
+                val trackLabel = "${vkTrack.artist} — ${vkTrack.title}"
+                val progressPercent = current.toFloat() / total.toFloat()
+
+                _uiState.value = MigrationUiState.MatchingTracks(
+                    current = current,
+                    total = total,
+                    currentTrackName = trackLabel,
+                    progressPercent = progressPercent,
+                    matchedCount = matchedCount,
+                    unmatchedCount = unmatchedCount
+                )
+
+                delay(30)
+
+                val matched = matchVkTrack(vkTrack)
+                if (matched != null) {
+                    matchedCount++
+                } else {
+                    unmatchedCount++
                 }
 
-                // 5. Занесение треков в Любимое
+                val inFav = favTracks.any { it.id == vkTrack.id }
+                val targetPls = playlists.filter { pl -> pl.tracks.any { it.id == vkTrack.id } }.map { it.title }
+
+                reviewItems.add(
+                    MigrationReviewItem(
+                        vkTrack = vkTrack,
+                        matchedTrack = matched,
+                        isFavorite = inFav,
+                        targetPlaylists = targetPls
+                    )
+                )
+            }
+
+            // Переход к экрану проверки сопоставления
+            _uiState.value = MigrationUiState.ReviewMatching(
+                items = reviewItems,
+                isDownloadRequested = isDownloadRequested,
+                isClearTracksRequested = isClearTracksRequested
+            )
+        }
+    }
+
+    /**
+     * Изменение сопоставления трека вручную из таблицы сопоставления
+     */
+    fun updateMatchedTrack(vkTrackId: Long, newMatchedTrack: Track?) {
+        val current = _uiState.value
+        if (current is MigrationUiState.ReviewMatching) {
+            val updated = current.items.map { item ->
+                if (item.vkTrack.id == vkTrackId) {
+                    item.copy(matchedTrack = newMatchedTrack)
+                } else {
+                    item
+                }
+            }
+            _uiState.value = current.copy(items = updated)
+        }
+    }
+
+    /**
+     * Ручной поиск трека для замены или сопоставления ненайденного
+     */
+    suspend fun searchReplacement(query: String): List<Track> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        runCatching {
+            innerTubeRepository.searchTracks(query.trim(), limit = 15)
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Шаг 3: Сохранение подтвержденных сопоставленных треков в базу и запуск скачивания
+     */
+    fun applyMigration(
+        items: List<MigrationReviewItem>,
+        isDownloadRequested: Boolean,
+        isClearTracksRequested: Boolean
+    ) {
+        viewModelScope.launch {
+            try {
+                _uiState.value = MigrationUiState.SavingToDatabase("Сохранение треков в медиатеку...")
+
+                // 1. Очистка старых треков (если была выбрана настройка)
+                // ВАЖНО: загруженные пользователем треки (isUserUploaded == true) НЕ удаляются!
+                if (isClearTracksRequested) {
+                    playlistRepository.clearAllExceptUserUploaded()
+                }
+
+                // 2. Подготовка сопоставленных треков
+                val matchedItems = items.filter { it.matchedTrack != null }
+                val vkIdToMatched = matchedItems.associate { it.vkTrack.id to it.matchedTrack!! }
+
+                // 3. Сохранение треков в "Любимое"
                 val minFavPos = musicDao.getMinFavoriteOrder() ?: 0
-                var favOrderOffset = 1
-                for (favTrack in favoriteVkTracks) {
-                    val matched = vkIdToMatchedTrack[favTrack.id] ?: continue
-                    val targetPos = minFavPos - favOrderOffset++
-                    musicDao.insertTrack(
-                        TrackEntity(
-                            id = matched.id,
-                            title = matched.title,
-                            artist = matched.artist,
-                            album = matched.album,
-                            albumId = matched.albumId,
-                            duration = matched.duration,
-                            durationSeconds = matched.durationSeconds,
-                            thumbnailUrl = matched.thumbnailUrl,
-                            isFavorite = true,
-                            favoriteOrderPosition = targetPos
-                        )
-                    )
-                }
-
-                // 6. Создание плейлистов и наполнение их треками
-                var playlistsCreatedCount = 0
-                for (vkPl in vkPlaylists) {
-                    if (vkPl.tracks.isEmpty()) continue
-                    val createdId = playlistRepository.createPlaylist(vkPl.title)
-                    playlistsCreatedCount++
-
-                    for (t in vkPl.tracks) {
-                        val matched = vkIdToMatchedTrack[t.id] ?: continue
-                        // Сохраняем в таблицу tracks и связываем с плейлистом
+                var favOffset = 1
+                for (item in matchedItems) {
+                    if (item.isFavorite) {
+                        val matched = item.matchedTrack ?: continue
+                        val targetPos = minFavPos - favOffset++
                         musicDao.insertTrack(
                             TrackEntity(
                                 id = matched.id,
@@ -201,114 +315,170 @@ class VkMigrationViewModel(
                                 duration = matched.duration,
                                 durationSeconds = matched.durationSeconds,
                                 thumbnailUrl = matched.thumbnailUrl,
-                                isFavorite = false
+                                isFavorite = true,
+                                favoriteOrderPosition = targetPos
                             )
                         )
-                        playlistRepository.addTrackToPlaylist(createdId, matched)
                     }
                 }
 
-                // 7. Офлайн-скачивание треков (если запрошено пользователем)
-                var successfullyDownloadedCount = 0
-                val uniqueMatchedTracks = matchedTracksList.distinctBy { it.id }
+                // 4. Создание пользовательских плейлистов и привязка треков
+                val playlistTitleToId = mutableMapOf<String, Long>()
+                var playlistsCreatedCount = 0
+
+                for (vkPl in cachedVkPlaylists) {
+                    if (vkPl.tracks.isEmpty()) continue
+
+                    // Ищем или создаем плейлист
+                    val createdId = playlistRepository.createPlaylist(vkPl.title)
+                    playlistTitleToId[vkPl.title] = createdId
+                    playlistsCreatedCount++
+
+                    var plPos = 0
+                    for (t in vkPl.tracks) {
+                        val matched = vkIdToMatched[t.id] ?: continue
+
+                        // Добавляем запись о треке в Room (если ещё нет)
+                        val existing = musicDao.getTrackById(matched.id)
+                        if (existing == null) {
+                            musicDao.insertTrack(
+                                TrackEntity(
+                                    id = matched.id,
+                                    title = matched.title,
+                                    artist = matched.artist,
+                                    album = matched.album,
+                                    albumId = matched.albumId,
+                                    duration = matched.duration,
+                                    durationSeconds = matched.durationSeconds,
+                                    thumbnailUrl = matched.thumbnailUrl,
+                                    isFavorite = false
+                                )
+                            )
+                        }
+
+                        // Связываем трек с плейлистом напрямую
+                        musicDao.addTrackToPlaylist(
+                            PlaylistTrackCrossRef(
+                                playlistId = createdId,
+                                trackId = matched.id,
+                                orderPosition = plPos++
+                            )
+                        )
+                    }
+                }
+
+                // 5. Офлайн-скачивание треков (если запрошено пользователем)
+                val uniqueMatchedTracks = matchedItems.map { it.matchedTrack!! }.distinctBy { it.id }
+                var downloadedCount = 0
 
                 if (isDownloadRequested && uniqueMatchedTracks.isNotEmpty()) {
                     val totalToDownload = uniqueMatchedTracks.size
                     _uiState.value = MigrationUiState.DownloadingTracks(
                         current = 0,
                         total = totalToDownload,
-                        currentTrackName = "Подготовка загрузки..."
+                        currentTrackName = "Подготовка к скачиванию...",
+                        progressPercent = 0f
                     )
 
-                    // Добавляем треки в очередь AudioDownloadManager
                     uniqueMatchedTracks.forEach { track ->
                         downloadManager.downloadTrack(track)
                     }
 
-                    // Мониторим прогресс скачивания до завершения или пропуска
                     val targetIds = uniqueMatchedTracks.map { it.id }.toSet()
                     while (!shouldSkipDownloading) {
                         val progressMap = downloadManager.downloadProgressMap.value
-                        val downloadedInThisSession = targetIds.count { id ->
-                            val prog = progressMap[id]
-                            prog?.status == DownloadStatus.COMPLETED
+                        val completedCount = targetIds.count { id ->
+                            progressMap[id]?.status == DownloadStatus.COMPLETED
                         }
-                        successfullyDownloadedCount = downloadedInThisSession
+                        downloadedCount = completedCount
 
-                        val currentlyActive = progressMap.entries.firstOrNull { it.key in targetIds && it.value.status == DownloadStatus.DOWNLOADING }
-                        val activeTrackTitle = currentlyActive?.let { active ->
-                            uniqueMatchedTracks.find { it.id == active.key }?.let { "${it.artist} — ${it.title}" }
-                        } ?: if (downloadedInThisSession < totalToDownload) "Загрузка треков..." else "Завершено"
+                        val activeEntry = progressMap.entries.firstOrNull { it.key in targetIds && it.value.status == DownloadStatus.DOWNLOADING }
+                        val activeTrackTitle = activeEntry?.let { entry ->
+                            uniqueMatchedTracks.find { it.id == entry.key }?.let { "${it.artist} — ${it.title}" }
+                        } ?: if (completedCount < totalToDownload) "Скачивание треков..." else "Скачивание завершено"
+
+                        val progressPct = if (totalToDownload > 0) completedCount.toFloat() / totalToDownload.toFloat() else 1f
 
                         _uiState.value = MigrationUiState.DownloadingTracks(
-                            current = downloadedInThisSession,
+                            current = completedCount,
                             total = totalToDownload,
-                            currentTrackName = activeTrackTitle
+                            currentTrackName = activeTrackTitle,
+                            progressPercent = progressPct
                         )
 
-                        if (downloadedInThisSession >= totalToDownload) {
+                        if (completedCount >= totalToDownload) {
                             break
                         }
-                        delay(600)
+                        delay(500)
                     }
                 }
 
-                // 8. Автоподписка на артистов, у которых более 6 треков
+                // 6. Подписка на артистов, у которых более 6 треков
                 _uiState.value = MigrationUiState.SubscribingArtists("Поиск и подписка на любимых артистов...")
                 val subscribedArtistNames = autoSubscribeToTopArtists(uniqueMatchedTracks)
 
-                // 9. Завершено!
+                // 7. Завершено!
                 _uiState.value = MigrationUiState.Completed(
-                    totalVkTracks = totalTracksToMigrate,
-                    successfullyMatched = matchedCount,
+                    totalProcessed = items.size,
+                    matchedTracks = matchedItems.size,
+                    unmatchedTracks = items.size - matchedItems.size,
+                    downloadedTracks = downloadedCount,
                     playlistsCreated = playlistsCreatedCount,
-                    downloadedCount = successfullyDownloadedCount,
-                    subscribedArtists = subscribedArtistNames
+                    artistsSubscribed = subscribedArtistNames
                 )
 
             } catch (e: Exception) {
                 e.printStackTrace()
-                _uiState.value = MigrationUiState.Error(e.message ?: "Произошла непредвиденная ошибка при миграции")
+                _uiState.value = MigrationUiState.Error(e.message ?: "Произошла ошибка при сохранении миграции")
             }
         }
     }
 
     /**
-     * Сопоставляет трек VK с каталогом YouTube Music
+     * Интеллектуальный поиск трека VK в каталоге InnerTube
      */
     private suspend fun matchVkTrack(vkTrack: VkTrack): Track? = withContext(Dispatchers.IO) {
-        // Проверка в локальной базе данных
         val existingEntity = musicDao.findTrackByTitleAndArtist(vkTrack.title, vkTrack.artist)
         if (existingEntity != null) {
             return@withContext existingEntity.toDomain()
         }
 
-        // Поиск через InnerTube
-        val searchCandidates = mutableListOf<Track>()
+        val candidates = mutableListOf<Track>()
 
-        // Попытка 1: с альбомом (если есть)
-        if (vkTrack.album.isNotBlank()) {
-            val qWithAlbum = "${vkTrack.artist} ${vkTrack.title} ${vkTrack.album}"
-            val res = runCatching { innerTubeRepository.searchTracks(qWithAlbum, limit = 6) }.getOrDefault(emptyList())
-            searchCandidates.addAll(res)
+        // 1. Полнотекстовый поиск по артисту и названию
+        val qStandard = "${vkTrack.artist} ${vkTrack.title}"
+        val res1 = runCatching { innerTubeRepository.searchTracks(qStandard, limit = 8) }.getOrDefault(emptyList())
+        candidates.addAll(res1)
+
+        // 2. Если результатов мало или нет совпадений - пробуем очищенную версию названия (без скобок и пометок)
+        if (candidates.isEmpty() || candidates.all { scoreCandidateMatch(it, vkTrack) < 35 }) {
+            val cleanTitle = vkTrack.title
+                .replace(Regex("(?i)\\((?:remaster(?:ed)?|feat\\.?|live|club|edit|remix|acoustic|radio).*?\\)"), "")
+                .replace(Regex("(?i)\\[(?:remaster(?:ed)?|feat\\.?|live|club|edit|remix|acoustic|radio).*?\\]"), "")
+                .trim()
+            if (cleanTitle != vkTrack.title && cleanTitle.isNotBlank()) {
+                val qClean = "${vkTrack.artist} $cleanTitle"
+                val res2 = runCatching { innerTubeRepository.searchTracks(qClean, limit = 6) }.getOrDefault(emptyList())
+                candidates.addAll(res2)
+            }
         }
 
-        // Попытка 2: только исполнитель и название трека
-        if (searchCandidates.isEmpty()) {
-            val qSimple = "${vkTrack.artist} ${vkTrack.title}"
-            val res = runCatching { innerTubeRepository.searchTracks(qSimple, limit = 8) }.getOrDefault(emptyList())
-            searchCandidates.addAll(res)
+        // 3. Если указан альбом - пробуем поиск с альбомом
+        if (candidates.isEmpty() && vkTrack.album.isNotBlank()) {
+            val qAlbum = "${vkTrack.artist} ${vkTrack.title} ${vkTrack.album}"
+            val res3 = runCatching { innerTubeRepository.searchTracks(qAlbum, limit = 6) }.getOrDefault(emptyList())
+            candidates.addAll(res3)
         }
 
-        if (searchCandidates.isEmpty()) {
+        if (candidates.isEmpty()) {
             return@withContext null
         }
 
-        // Оценка кандидатов и выбор лучшего
+        // Оценка кандидатов
         var bestCandidate: Track? = null
         var bestScore = -1
 
-        for (candidate in searchCandidates) {
+        for (candidate in candidates) {
             val score = scoreCandidateMatch(candidate, vkTrack)
             if (score > bestScore) {
                 bestScore = score
@@ -316,12 +486,10 @@ class VkMigrationViewModel(
             }
         }
 
-        // Порог релевантности
         if (bestScore >= 35) {
             bestCandidate
         } else {
-            // Если совпали хотя бы имя артиста или название
-            val first = searchCandidates.firstOrNull()
+            val first = candidates.firstOrNull()
             if (first != null && (first.artist.contains(vkTrack.artist, ignoreCase = true) || vkTrack.artist.contains(first.artist, ignoreCase = true))) {
                 first
             } else null
@@ -362,19 +530,14 @@ class VkMigrationViewModel(
             val diff = kotlin.math.abs(candidate.durationSeconds - vkTrack.durationSeconds)
             if (diff <= 5) score += 20
             else if (diff <= 15) score += 10
-            else if (diff > 120) score -= 25
+            else if (diff > 120) score -= 30
         }
 
         return score
     }
 
-    /**
-     * Поиск исполнителей с более чем 6 треками и оформление подписки
-     */
     private suspend fun autoSubscribeToTopArtists(tracks: List<Track>): List<String> = withContext(Dispatchers.IO) {
         val subscribedNames = mutableListOf<String>()
-
-        // Считаем треки по артистам
         val artistCounts = mutableMapOf<String, Int>()
         for (track in tracks) {
             val name = track.artist.trim()
@@ -383,18 +546,15 @@ class VkMigrationViewModel(
             }
         }
 
-        // Фильтруем: более 6 треков (> 6)
         val qualifyingArtists = artistCounts.filter { it.value > 6 }
 
-        for ((artistName, count) in qualifyingArtists) {
+        for ((artistName, _) in qualifyingArtists) {
             try {
-                // Проверяем, не подписан ли уже
                 if (musicDao.isArtistFollowedByName(artistName)) {
                     subscribedNames.add(artistName)
                     continue
                 }
 
-                // Ищем артиста через InnerTube
                 val searchRes = runCatching { innerTubeRepository.searchArtists(artistName, limit = 5) }.getOrDefault(emptyList())
                 val matchedArtist = searchRes.firstOrNull { it.name.equals(artistName, ignoreCase = true) }
                     ?: searchRes.firstOrNull()
@@ -411,7 +571,6 @@ class VkMigrationViewModel(
                     )
                     subscribedNames.add(matchedArtist.name)
                 } else {
-                    // Создаем базовую подписку по имени
                     val syntheticId = "artist_${artistName.hashCode()}"
                     musicDao.followArtist(
                         ArtistEntity(

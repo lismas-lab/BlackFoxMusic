@@ -1,6 +1,9 @@
 package com.blackfox.music.data.network
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -237,93 +240,54 @@ class VkRepository {
     }
 
     /**
-     * Получает список пользовательских плейлистов и треки внутри каждого из них
+     * Получает список пользовательских плейлистов и треки внутри каждого из них.
+     * Опрашивает идентификаторы плейлистов параллельными пачками в фоновом пуле.
      */
     suspend fun fetchPlaylistsWithTracks(userId: Long): Result<List<VkPlaylist>> = withContext(Dispatchers.IO) {
         runCatching {
             ensureGuestSession()
 
-            // 1. Запрашиваем раздел плейлистов
-            val form = FormBody.Builder()
-                .add("act", "section")
-                .add("al", "1")
-                .add("claim", "0")
-                .add("is_layer", "0")
-                .add("owner_id", userId.toString())
-                .add("section", "playlists")
-                .build()
+            val discoveredPlaylists = mutableListOf<VkPlaylist>()
+            var chunkStart = 1
+            var consecutiveEmptyChunks = 0
 
-            val req = Request.Builder()
-                .url("https://vk.com/al_audio.php")
-                .post(form)
-                .header("User-Agent", userAgent)
-                .header("X-Requested-With", "XMLHttpRequest")
-                .header("Referer", "https://vk.com/audios$userId")
-                .build()
-
-            val playlistsHtml = client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) return@runCatching emptyList()
-                val bytes = response.body?.bytes() ?: byteArrayOf()
-                val json = JSONObject(String(bytes, windows1251))
-                val payload = json.optJSONArray("payload") ?: return@runCatching emptyList()
-                if (payload.length() > 1) {
-                    val arr = payload.optJSONArray(1)
-                    if (arr != null && arr.length() > 0) arr.optString(0, "") else ""
-                } else ""
-            }
-
-            if (playlistsHtml.isBlank()) {
-                return@runCatching emptyList()
-            }
-
-            // 2. Ищем метаданные плейлистов в HTML
-            // data-playlist-id="type_ownerId_id" data-title="Title" data-access-hash="hash"
-            val playlists = mutableListOf<VkPlaylist>()
-            val pattern = Pattern.compile("data-playlist-id=\"(?:playlist_)?(-?\\d+)_(\\d+)\"[^>]*?data-title=\"([^\"]*)\"(?:[^>]*?data-access-hash=\"([^\"]*)\")?")
-            val matcher = pattern.matcher(playlistsHtml)
-
-            while (matcher.find()) {
-                val ownerId = matcher.group(1)?.toLongOrNull() ?: userId
-                val plId = matcher.group(2)?.toLongOrNull() ?: continue
-                val title = unescapeHtml(matcher.group(3) ?: "Плейлист")
-                val accessHash = matcher.group(4) ?: ""
-
-                if (plId > 0 && playlists.none { it.id == plId }) {
-                    playlists.add(VkPlaylist(id = plId, ownerId = ownerId, title = title, accessHash = accessHash))
+            // Сканируем идентификаторы плейлистов параллельными пачками по 15 запросов
+            while (chunkStart <= 120 && consecutiveEmptyChunks < 2) {
+                val chunkEnd = chunkStart + 14
+                val chunkResults = coroutineScope {
+                    (chunkStart..chunkEnd).map { plId ->
+                        async(Dispatchers.IO) {
+                            probePlaylist(userId, plId.toLong())
+                        }
+                    }.awaitAll().filterNotNull()
                 }
-            }
 
-            // Запасной парсинг ссылок /music/playlist/{ownerId}_{plId}
-            if (playlists.isEmpty()) {
-                val linkPattern = Pattern.compile("href=\"/music/playlist/(-?\\d+)_(\\d+)(?:_([a-zA-Z0-9]+))?\"[^>]*>.*?<.*?class=\"[^\"]*title[^\"]*\"[^>]*>([^<]+)<", Pattern.DOTALL)
-                val linkMatcher = linkPattern.matcher(playlistsHtml)
-                while (linkMatcher.find()) {
-                    val ownerId = linkMatcher.group(1)?.toLongOrNull() ?: userId
-                    val plId = linkMatcher.group(2)?.toLongOrNull() ?: continue
-                    val hash = linkMatcher.group(3) ?: ""
-                    val title = unescapeHtml(linkMatcher.group(4) ?: "Плейлист")
-                    if (plId > 0 && playlists.none { it.id == plId }) {
-                        playlists.add(VkPlaylist(id = plId, ownerId = ownerId, title = title.trim(), accessHash = hash))
+                if (chunkResults.isEmpty()) {
+                    consecutiveEmptyChunks++
+                } else {
+                    consecutiveEmptyChunks = 0
+                    for (pl in chunkResults) {
+                        // Системный плейлист "Мне нравится" дублирует избранное,
+                        // поэтому пользовательские плейлисты - это все остальные
+                        val isFavSystem = pl.title.equals("Мне нравится", ignoreCase = true) ||
+                                pl.title.equals("Любимые треки", ignoreCase = true) ||
+                                pl.title.equals("Избранное", ignoreCase = true)
+                        if (!isFavSystem && discoveredPlaylists.none { it.id == pl.id }) {
+                            discoveredPlaylists.add(pl)
+                        }
                     }
                 }
+                chunkStart += 15
             }
 
-            // 3. Для каждого найденного плейлиста загружаем его треки
-            val filledPlaylists = mutableListOf<VkPlaylist>()
-            for (pl in playlists) {
-                val tracks = fetchPlaylistTracks(pl.ownerId, pl.id, pl.accessHash)
-                filledPlaylists.add(pl.copy(tracks = tracks))
-            }
-
-            filledPlaylists
+            discoveredPlaylists
         }
     }
 
     /**
-     * Загружает треки конкретного плейлиста
+     * Проверяет существование плейлиста и загружает все его треки
      */
-    private suspend fun fetchPlaylistTracks(ownerId: Long, playlistId: Long, accessHash: String): List<VkTrack> = withContext(Dispatchers.IO) {
-        val tracks = mutableListOf<VkTrack>()
+    private suspend fun probePlaylist(ownerId: Long, playlistId: Long): VkPlaylist? = withContext(Dispatchers.IO) {
         try {
             val form = FormBody.Builder()
                 .add("act", "load_section")
@@ -333,7 +297,6 @@ class VkRepository {
                 .add("owner_id", ownerId.toString())
                 .add("playlist_id", playlistId.toString())
                 .add("type", "playlist")
-                .add("access_hash", accessHash)
                 .add("is_loading_all", "1")
                 .build()
 
@@ -342,29 +305,89 @@ class VkRepository {
                 .post(form)
                 .header("User-Agent", userAgent)
                 .header("X-Requested-With", "XMLHttpRequest")
+                .header("Referer", "https://vk.com/audios$ownerId")
                 .build()
 
-            val json = client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
-                val bytes = response.body?.bytes() ?: byteArrayOf()
+            val json = client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val bytes = resp.body?.bytes() ?: return@withContext null
                 JSONObject(String(bytes, windows1251))
             }
 
-            val payload = json.optJSONArray("payload") ?: return@withContext emptyList()
-            if (payload.length() > 1) {
-                val payloadData = payload.optJSONArray(1) ?: return@withContext emptyList()
-                val firstObj = payloadData.optJSONObject(0) ?: return@withContext emptyList()
-                val listArray = firstObj.optJSONArray("list") ?: return@withContext emptyList()
+            val payload = json.optJSONArray("payload") ?: return@withContext null
+            if (payload.length() <= 1) return@withContext null
+            val payloadData = payload.optJSONArray(1) ?: return@withContext null
+            if (payloadData.length() == 0) return@withContext null
 
-                for (i in 0 until listArray.length()) {
-                    val trackArr = listArray.optJSONArray(i) ?: continue
-                    parseVkTrackFromArray(trackArr)?.let { tracks.add(it) }
+            val firstObj = payloadData.opt(0)
+            if (firstObj !is JSONObject) return@withContext null
+
+            val title = unescapeHtml(firstObj.optString("title", ""))
+            if (title.isBlank()) return@withContext null
+
+            val tracks = mutableListOf<VkTrack>()
+            val listArray = firstObj.optJSONArray("list") ?: JSONArray()
+            for (i in 0 until listArray.length()) {
+                val trackArr = listArray.optJSONArray(i) ?: continue
+                parseVkTrackFromArray(trackArr)?.let { tracks.add(it) }
+            }
+
+            // Если плейлист содержит > 100 треков, догружаем следующие страницы
+            var offset = firstObj.optInt("nextOffset", 0)
+            var hasMore = firstObj.optInt("hasMore", 0) == 1
+            while (hasMore && offset > 0) {
+                val pageForm = FormBody.Builder()
+                    .add("act", "load_section")
+                    .add("al", "1")
+                    .add("claim", "0")
+                    .add("offset", offset.toString())
+                    .add("owner_id", ownerId.toString())
+                    .add("playlist_id", playlistId.toString())
+                    .add("type", "playlist")
+                    .add("is_loading_all", "1")
+                    .build()
+
+                val pageReq = Request.Builder()
+                    .url("https://vk.com/al_audio.php")
+                    .post(pageForm)
+                    .header("User-Agent", userAgent)
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .build()
+
+                val pageJson = client.newCall(pageReq).execute().use { resp ->
+                    if (!resp.isSuccessful) null
+                    else {
+                        val bytes = resp.body?.bytes() ?: byteArrayOf()
+                        JSONObject(String(bytes, windows1251))
+                    }
+                }
+
+                val pPayload = pageJson?.optJSONArray("payload")
+                val pData = if (pPayload != null && pPayload.length() > 1) pPayload.optJSONArray(1) else null
+                val pObj = pData?.optJSONObject(0)
+                if (pObj != null) {
+                    val pList = pObj.optJSONArray("list") ?: JSONArray()
+                    for (i in 0 until pList.length()) {
+                        val tArr = pList.optJSONArray(i) ?: continue
+                        parseVkTrackFromArray(tArr)?.let { tracks.add(it) }
+                    }
+                    hasMore = pObj.optInt("hasMore", 0) == 1
+                    offset = pObj.optInt("nextOffset", 0)
+                } else {
+                    hasMore = false
                 }
             }
+
+            VkPlaylist(
+                id = playlistId,
+                ownerId = ownerId,
+                title = title,
+                accessHash = firstObj.optString("accessHash", ""),
+                tracks = tracks
+            )
         } catch (e: Exception) {
-            e.printStackTrace()
+            null
         }
-        tracks
     }
 
     /**
