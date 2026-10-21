@@ -7,15 +7,19 @@ import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Environment
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionResult
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
@@ -34,11 +38,11 @@ class AudioPlayerManager(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 ) {
 
-    private enum class PlaybackEngine {
+    internal enum class PlaybackEngine {
         NONE, EXOPLAYER, WEBVIEW
     }
 
-    private var activeEngine = PlaybackEngine.NONE
+    internal var activeEngine = PlaybackEngine.NONE
 
     // 1. Центральный движок ExoPlayer с аудиофокусом, Wakelock и фоновым воспроизведением
     val player: ExoPlayer = ExoPlayer.Builder(context)
@@ -57,6 +61,7 @@ class AudioPlayerManager(
     val webViewEngine = YouTubeAudioWebView(context)
 
     private var mediaSession: MediaSession? = null
+    private var forwardingPlayer: BlackFoxForwardingPlayer? = null
 
     private val _currentTrack = MutableStateFlow<Track?>(null)
     val currentTrack: StateFlow<Track?> = _currentTrack.asStateFlow()
@@ -164,8 +169,24 @@ class AudioPlayerManager(
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            mediaSession = MediaSession.Builder(serviceContext, player)
+            val fp = BlackFoxForwardingPlayer(player, this)
+            forwardingPlayer = fp
+
+            mediaSession = MediaSession.Builder(serviceContext, fp)
                 .setSessionActivity(sessionActivityPendingIntent)
+                .setCallback(object : MediaSession.Callback {
+                    override fun onConnect(
+                        session: MediaSession,
+                        controller: MediaSession.ControllerInfo
+                    ): MediaSession.ConnectionResult {
+                        val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().build()
+                        val playerCommands = session.player.availableCommands
+                        return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                            .setAvailableSessionCommands(sessionCommands)
+                            .setAvailablePlayerCommands(playerCommands)
+                            .build()
+                    }
+                })
                 .build()
         }
         return mediaSession!!
@@ -187,13 +208,16 @@ class AudioPlayerManager(
         playTrack(tracks[currentQueueIndex])
     }
 
-    fun playNext() {
+    fun playNext(loop: Boolean = false) {
         val queue = _currentQueue.value
         if (queue.isEmpty()) return
         val nextIdx = currentQueueIndex + 1
         if (nextIdx in queue.indices) {
             currentQueueIndex = nextIdx
             playTrack(queue[nextIdx])
+        } else if (loop && queue.isNotEmpty()) {
+            currentQueueIndex = 0
+            playTrack(queue[0])
         }
     }
 
@@ -207,6 +231,9 @@ class AudioPlayerManager(
         if (prevIdx in queue.indices) {
             currentQueueIndex = prevIdx
             playTrack(queue[prevIdx])
+        } else if (queue.isNotEmpty()) {
+            currentQueueIndex = queue.lastIndex
+            playTrack(queue[currentQueueIndex])
         } else {
             seekTo(0)
         }
@@ -404,5 +431,115 @@ class AudioPlayerManager(
         webViewEngine.release()
         mediaSession?.release()
         mediaSession = null
+        forwardingPlayer = null
+    }
+}
+
+@OptIn(UnstableApi::class)
+private class BlackFoxForwardingPlayer(
+    player: Player,
+    private val playerManager: AudioPlayerManager
+) : ForwardingPlayer(player) {
+
+    override fun getAvailableCommands(): Player.Commands {
+        return super.getAvailableCommands().buildUpon()
+            .add(Player.COMMAND_SEEK_TO_NEXT)
+            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .add(Player.COMMAND_PLAY_PAUSE)
+            .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+            .add(Player.COMMAND_STOP)
+            .build()
+    }
+
+    override fun isCommandAvailable(command: Int): Boolean {
+        return when (command) {
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            Player.COMMAND_PLAY_PAUSE,
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_STOP -> true
+            else -> super.isCommandAvailable(command)
+        }
+    }
+
+    override fun hasNextMediaItem(): Boolean = true
+    override fun hasPreviousMediaItem(): Boolean = true
+    override fun isCurrentMediaItemSeekable(): Boolean = true
+    override fun isCurrentMediaItemDynamic(): Boolean = false
+
+    override fun seekToNext() {
+        playerManager.playNext(loop = true)
+    }
+
+    override fun seekToNextMediaItem() {
+        playerManager.playNext(loop = true)
+    }
+
+    override fun seekToPrevious() {
+        playerManager.playPrevious()
+    }
+
+    override fun seekToPreviousMediaItem() {
+        playerManager.playPrevious()
+    }
+
+    override fun seekTo(positionMs: Long) {
+        playerManager.seekTo(positionMs)
+    }
+
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+        playerManager.seekTo(positionMs)
+    }
+
+    override fun play() {
+        when (playerManager.activeEngine) {
+            AudioPlayerManager.PlaybackEngine.EXOPLAYER -> {
+                if (playerManager.player.playbackState == Player.STATE_IDLE) {
+                    playerManager.currentTrack.value?.let { playerManager.playTrack(it) }
+                } else {
+                    super.play()
+                }
+            }
+            AudioPlayerManager.PlaybackEngine.WEBVIEW -> playerManager.webViewEngine.resumeTrack()
+            AudioPlayerManager.PlaybackEngine.NONE -> {
+                playerManager.currentTrack.value?.let { playerManager.playTrack(it) }
+            }
+        }
+    }
+
+    override fun pause() {
+        when (playerManager.activeEngine) {
+            AudioPlayerManager.PlaybackEngine.EXOPLAYER -> super.pause()
+            AudioPlayerManager.PlaybackEngine.WEBVIEW -> playerManager.webViewEngine.pauseTrack()
+            AudioPlayerManager.PlaybackEngine.NONE -> Unit
+        }
+    }
+
+    override fun isPlaying(): Boolean {
+        return if (playerManager.activeEngine == AudioPlayerManager.PlaybackEngine.WEBVIEW) {
+            playerManager.webViewEngine.isPlaying.value
+        } else {
+            super.isPlaying()
+        }
+    }
+
+    override fun getCurrentPosition(): Long {
+        return if (playerManager.activeEngine == AudioPlayerManager.PlaybackEngine.WEBVIEW) {
+            playerManager.currentPositionMs.value
+        } else {
+            super.getCurrentPosition()
+        }
+    }
+
+    override fun getDuration(): Long {
+        return if (playerManager.activeEngine == AudioPlayerManager.PlaybackEngine.WEBVIEW) {
+            playerManager.totalDurationMs.value
+        } else {
+            super.getDuration()
+        }
     }
 }

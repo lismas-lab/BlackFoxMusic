@@ -23,6 +23,18 @@ class PlaylistRepository(
     fun getPlaylist(playlistId: Long): Flow<PlaylistWithTracks?> =
         musicDao.getPlaylistWithTracks(playlistId)
 
+    fun getTracksForPlaylist(playlistId: Long): Flow<List<TrackEntity>> =
+        musicDao.getTracksForPlaylist(playlistId)
+
+    suspend fun moveTrack(playlistId: Long, fromIndex: Int, toIndex: Int) = withContext(Dispatchers.IO) {
+        val currentIds = musicDao.getTrackIdsInPlaylistOrdered(playlistId).toMutableList()
+        if (fromIndex in currentIds.indices && toIndex in currentIds.indices && fromIndex != toIndex) {
+            val moved = currentIds.removeAt(fromIndex)
+            currentIds.add(toIndex, moved)
+            musicDao.updatePlaylistTracksOrder(playlistId, currentIds)
+        }
+    }
+
     fun getPlaylistIdsForTrack(trackId: String): Flow<List<Long>> =
         musicDao.getPlaylistIdsForTrack(trackId)
 
@@ -61,8 +73,9 @@ class PlaylistRepository(
                 )
             )
         }
+        val nextPos = musicDao.getNextOrderPosition(playlistId)
         musicDao.addTrackToPlaylist(
-            PlaylistTrackCrossRef(playlistId = playlistId, trackId = track.id)
+            PlaylistTrackCrossRef(playlistId = playlistId, trackId = track.id, orderPosition = nextPos)
         )
         // Автоматически скачиваем трек при добавлении в плейлист
         downloadManager.downloadTrack(track)

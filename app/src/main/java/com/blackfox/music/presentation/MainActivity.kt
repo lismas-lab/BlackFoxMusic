@@ -251,13 +251,18 @@ class MainActivity : ComponentActivity() {
                         selectedPlaylistId != null -> {
                             val currentPlWithTracks = userPlaylists.find { it.playlist.playlistId == selectedPlaylistId }
                             if (currentPlWithTracks != null) {
+                                val currentPlaylist = currentPlWithTracks.playlist
+                                val orderedTracks by playlistRepository.getTracksForPlaylist(currentPlaylist.playlistId).collectAsState(initial = emptyList())
+                                val activeTracks = if (orderedTracks.isNotEmpty()) orderedTracks else currentPlWithTracks.tracks
+
                                 PlaylistDetailScreen(
-                                    playlistWithTracks = currentPlWithTracks,
+                                    playlist = currentPlaylist,
+                                    tracks = activeTracks,
                                     favoriteTrackIds = favoriteSet,
                                     downloadProgressMap = downloadProgressMap,
                                     onBackClick = { selectedPlaylistId = null },
                                     onTrackClick = { track ->
-                                        val domainList = currentPlWithTracks.tracks.map { entity ->
+                                        val domainList = activeTracks.map { entity ->
                                             Track(
                                                 id = entity.id,
                                                 title = entity.title,
@@ -272,7 +277,7 @@ class MainActivity : ComponentActivity() {
                                         playTrackInQueue(track, domainList)
                                     },
                                     onPlayAll = {
-                                        val domainList = currentPlWithTracks.tracks.map { entity ->
+                                        val domainList = activeTracks.map { entity ->
                                             Track(
                                                 id = entity.id,
                                                 title = entity.title,
@@ -289,7 +294,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onShuffle = {
-                                        val domainList = currentPlWithTracks.tracks.map { entity ->
+                                        val domainList = activeTracks.map { entity ->
                                             Track(
                                                 id = entity.id,
                                                 title = entity.title,
@@ -308,23 +313,28 @@ class MainActivity : ComponentActivity() {
                                     onToggleFavorite = { track -> toggleFavorite(track) },
                                     onRemoveTrack = { trackId ->
                                         coroutineScope.launch {
-                                            playlistRepository.removeTrackFromPlaylist(currentPlWithTracks.playlist.playlistId, trackId)
+                                            playlistRepository.removeTrackFromPlaylist(currentPlaylist.playlistId, trackId)
                                         }
                                     },
                                     onUpdateCover = { uri: Uri? ->
                                         coroutineScope.launch {
-                                            playlistRepository.updatePlaylistCover(currentPlWithTracks.playlist.playlistId, uri)
+                                            playlistRepository.updatePlaylistCover(currentPlaylist.playlistId, uri)
                                         }
                                     },
                                     onRenamePlaylist = { newName ->
                                         coroutineScope.launch {
-                                            playlistRepository.renamePlaylist(currentPlWithTracks.playlist.playlistId, newName)
+                                            playlistRepository.renamePlaylist(currentPlaylist.playlistId, newName)
                                         }
                                     },
                                     onDeletePlaylist = {
                                         coroutineScope.launch {
-                                            playlistRepository.deletePlaylist(currentPlWithTracks.playlist.playlistId)
+                                            playlistRepository.deletePlaylist(currentPlaylist.playlistId)
                                             selectedPlaylistId = null
+                                        }
+                                    },
+                                    onMoveTrack = { fromIdx, toIdx ->
+                                        coroutineScope.launch {
+                                            playlistRepository.moveTrack(currentPlaylist.playlistId, fromIdx, toIdx)
                                         }
                                     }
                                 )
@@ -512,7 +522,7 @@ class MainActivity : ComponentActivity() {
                                 isFavorite = isFav,
                                 onPlayPauseClick = { playerManager.togglePlayPause() },
                                 onPreviousClick = { playerManager.playPrevious() },
-                                onNextClick = { playerManager.playNext() },
+                                onNextClick = { playerManager.playNext(loop = true) },
                                 onSeekTo = { newPos -> playerManager.seekTo(newPos) },
                                 onFavoriteToggle = { toggleFavorite(track) },
                                 onDownloadClick = { downloadManager.downloadTrack(track) },

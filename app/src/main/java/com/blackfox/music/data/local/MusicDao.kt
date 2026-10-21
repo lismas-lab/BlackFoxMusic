@@ -99,6 +99,30 @@ interface MusicDao {
     @Query("SELECT trackId FROM playlist_track_cross_ref WHERE playlistId = :playlistId")
     suspend fun getTrackIdsInPlaylist(playlistId: Long): List<String>
 
+    @Query("""
+        SELECT t.* FROM tracks t 
+        INNER JOIN playlist_track_cross_ref r ON t.id = r.trackId 
+        WHERE r.playlistId = :playlistId 
+        ORDER BY r.orderPosition ASC, r.addedAt ASC
+    """)
+    fun getTracksForPlaylist(playlistId: Long): Flow<List<TrackEntity>>
+
+    @Query("SELECT trackId FROM playlist_track_cross_ref WHERE playlistId = :playlistId ORDER BY orderPosition ASC, addedAt ASC")
+    suspend fun getTrackIdsInPlaylistOrdered(playlistId: Long): List<String>
+
+    @Query("SELECT COALESCE(MAX(orderPosition), -1) + 1 FROM playlist_track_cross_ref WHERE playlistId = :playlistId")
+    suspend fun getNextOrderPosition(playlistId: Long): Int
+
+    @Query("UPDATE playlist_track_cross_ref SET orderPosition = :orderPosition WHERE playlistId = :playlistId AND trackId = :trackId")
+    suspend fun updateTrackOrder(playlistId: Long, trackId: String, orderPosition: Int)
+
+    @Transaction
+    suspend fun updatePlaylistTracksOrder(playlistId: Long, trackIdsInOrder: List<String>) {
+        trackIdsInOrder.forEachIndexed { index, trackId ->
+            updateTrackOrder(playlistId, trackId, index)
+        }
+    }
+
     @Query("SELECT COUNT(*) FROM playlist_track_cross_ref WHERE trackId = :trackId AND playlistId != :excludePlaylistId")
     suspend fun countPlaylistsContainingTrack(trackId: String, excludePlaylistId: Long): Int
 }
