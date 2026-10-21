@@ -8,6 +8,7 @@ import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.AudioStreamResolver
 import com.blackfox.music.domain.model.Album
 import com.blackfox.music.domain.model.Track
+import com.blackfox.music.service.DownloadService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,6 +74,7 @@ class AudioDownloadManager(
                     }
                 } catch (e: Exception) {}
 
+                DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", 0)
                 currentDownloadingTrackId = track.id
                 val job = launch {
                     processTrackDownload(track)
@@ -89,6 +91,7 @@ class AudioDownloadManager(
                             wakeLock.release()
                         }
                     } catch (e: Exception) {}
+                    DownloadService.stop(context)
                 }
             }
         }
@@ -101,11 +104,16 @@ class AudioDownloadManager(
         if (activeOrQueuedTrackIds.contains(track.id)) return
         activeOrQueuedTrackIds.add(track.id)
 
+        DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", 0)
+
         scope.launch {
             val existing = musicDao.getTrackById(track.id)
             if (existing?.isDownloaded == true && existing.localFilePath != null && File(existing.localFilePath).exists()) {
                 activeOrQueuedTrackIds.remove(track.id)
                 updateProgress(track.id, DownloadProgress(track.id, 100, 0, 0, DownloadStatus.COMPLETED))
+                if (activeOrQueuedTrackIds.isEmpty()) {
+                    DownloadService.stop(context)
+                }
                 return@launch
             }
 
@@ -129,6 +137,7 @@ class AudioDownloadManager(
                 attempts++
                 directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id) { prepPercent ->
                     updateProgress(track.id, DownloadProgress(track.id, prepPercent, 0, 0, DownloadStatus.DOWNLOADING))
+                    DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", prepPercent)
                 }
                 if (directStreamUrl.isNullOrBlank() && attempts < 3) {
                     delay(2000)
@@ -167,19 +176,25 @@ class AudioDownloadManager(
             var totalBytes = 0L
             var downloadAttempts = 0
             var downloadSuccess = false
-            while (!downloadSuccess && downloadAttempts < 2) {
+            while (!downloadSuccess && downloadAttempts < 3) {
                 downloadAttempts++
+                val streamUrl = directStreamUrl ?: throw IOException("Аудиопоток не найден")
                 try {
-                    totalBytes = downloadFileWithProgress(directStreamUrl, tempFile) { percent, downloaded, total ->
+                    totalBytes = downloadFileWithProgress(streamUrl, tempFile) { percent, downloaded, total ->
                         updateProgress(
                             track.id,
                             DownloadProgress(track.id, percent, downloaded, total, DownloadStatus.DOWNLOADING)
                         )
+                        DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", percent)
                     }
                     downloadSuccess = true
                 } catch (e: Exception) {
-                    if (downloadAttempts >= 2) throw e
+                    if (downloadAttempts >= 3) throw e
                     delay(1500)
+                    val refreshedUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id)
+                    if (!refreshedUrl.isNullOrBlank()) {
+                        directStreamUrl = refreshedUrl
+                    }
                 }
             }
 
@@ -258,6 +273,9 @@ class AudioDownloadManager(
         )
 
         _downloadProgressMap.value = _downloadProgressMap.value - trackId
+        if (activeOrQueuedTrackIds.isEmpty()) {
+            DownloadService.stop(context)
+        }
     }
 
     fun getDownloadedStorageSize(): Long {
@@ -276,6 +294,7 @@ class AudioDownloadManager(
         coversDirectory.listFiles()?.forEach { it.delete() }
         musicDao.resetAllDownloadedStatus()
         _downloadProgressMap.value = emptyMap()
+        DownloadService.stop(context)
     }
 
     private suspend fun downloadFileWithProgress(

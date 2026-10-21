@@ -42,7 +42,7 @@ import com.blackfox.music.presentation.theme.*
 
 enum class ArtistTab(val title: String) {
     OVERVIEW("Обзор"),
-    ALL_SONGS("Все песни"),
+    ALL_SONGS("Все треки"),
     SIMILAR("Похожие")
 }
 
@@ -66,6 +66,7 @@ fun ArtistScreen(
     val isAllTracksLoading by viewModel.isAllTracksLoading.collectAsState()
     val allTracksContinuationToken by viewModel.allTracksContinuationToken.collectAsState()
     val isLoadingMoreTracks by viewModel.isLoadingMoreTracks.collectAsState()
+    val hasMoreTracks by viewModel.hasMoreTracks.collectAsState()
     val totalSongsCount by viewModel.totalSongsCountString.collectAsState()
 
     var selectedTab by remember { mutableStateOf(ArtistTab.OVERVIEW) }
@@ -144,13 +145,7 @@ fun ArtistScreen(
                         val isSelected = selectedTab == tab
                         val hasMore = !allTracksContinuationToken.isNullOrBlank()
                         val countSuffix = when (tab) {
-                            ArtistTab.ALL_SONGS -> {
-                                if (!totalSongsCount.isNullOrBlank()) {
-                                    " ($totalSongsCount)"
-                                } else if (allTracks.isNotEmpty()) {
-                                    if (hasMore) " (${allTracks.size}+)" else " (${allTracks.size})"
-                                } else ""
-                            }
+                            ArtistTab.ALL_SONGS -> ""
                             ArtistTab.SIMILAR -> if (artist.similarArtists.isNotEmpty()) " (${artist.similarArtists.size})" else ""
                             else -> ""
                         }
@@ -296,7 +291,7 @@ fun ArtistScreen(
                                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                                         ) {
                                             Text(
-                                                text = "Все песни",
+                                                text = "Все треки",
                                                 color = FoxOrange,
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.SemiBold
@@ -466,7 +461,7 @@ fun ArtistScreen(
                                     )
                                 }
 
-                                if (!allTracksContinuationToken.isNullOrBlank() || activeTracks.size >= 50) {
+                                if (hasMoreTracks && activeTracks.isNotEmpty()) {
                                     item {
                                         Box(
                                             modifier = Modifier
@@ -481,23 +476,25 @@ fun ArtistScreen(
                                                     strokeWidth = 2.5.dp
                                                 )
                                             } else {
-                                                Button(
-                                                    onClick = { viewModel.loadMoreTracks() },
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = Color(0x22FFFFFF),
-                                                        contentColor = TextPrimary
-                                                    ),
-                                                    shape = RoundedCornerShape(20.dp),
-                                                    modifier = Modifier.liquidGlass(cornerRadius = 20.dp, backgroundColor = Color(0x18FFFFFF))
+                                                Row(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(20.dp))
+                                                        .liquidGlass(cornerRadius = 20.dp, backgroundColor = Color(0x22FFFFFF))
+                                                        .clickable { viewModel.loadMoreTracks() }
+                                                        .padding(horizontal = 24.dp, vertical = 10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.KeyboardArrowDown,
                                                         contentDescription = null,
+                                                        tint = TextPrimary,
                                                         modifier = Modifier.size(20.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(8.dp))
                                                     Text(
                                                         text = "Показать больше",
+                                                        color = TextPrimary,
                                                         fontWeight = FontWeight.SemiBold,
                                                         fontSize = 14.sp
                                                     )

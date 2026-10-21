@@ -882,13 +882,20 @@ class InnerTubeRepository {
             val payload = JSONObject().apply {
                 put("continuation", continuationToken)
             }
-            val response = sendRequest("browse", payload)
-            val tracks = mutableListOf<Track>()
-            var nextToken: String? = null
-
-            val shelfCont = response.optJSONObject("continuationContents")?.optJSONObject("musicPlaylistShelfContinuation")
+            var response = sendRequest("browse", payload)
+            var shelfCont = response.optJSONObject("continuationContents")?.optJSONObject("musicPlaylistShelfContinuation")
                 ?: response.optJSONObject("continuationContents")?.optJSONObject("musicShelfContinuation")
                 ?: response.optJSONObject("continuationContents")?.optJSONObject("sectionListContinuation")
+
+            if (shelfCont == null) {
+                response = sendRequest("search", payload)
+                shelfCont = response.optJSONObject("continuationContents")?.optJSONObject("musicPlaylistShelfContinuation")
+                    ?: response.optJSONObject("continuationContents")?.optJSONObject("musicShelfContinuation")
+                    ?: response.optJSONObject("continuationContents")?.optJSONObject("sectionListContinuation")
+            }
+
+            val tracks = mutableListOf<Track>()
+            var nextToken: String? = null
 
             if (shelfCont != null) {
                 val contArray = shelfCont.optJSONArray("continuations")

@@ -35,6 +35,7 @@ class ArtistViewModel(
     val allTracksContinuationToken = MutableStateFlow<String?>(null)
     val totalSongsCountString = MutableStateFlow<String?>(null)
     val isLoadingMoreTracks = MutableStateFlow(false)
+    val hasMoreTracks = MutableStateFlow(true)
 
     val playlists: StateFlow<List<PlaylistEntity>> = musicDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -98,10 +99,12 @@ class ArtistViewModel(
                 allTracks.value = if (page.tracks.isNotEmpty()) page.tracks else a.topTracks
                 allTracksContinuationToken.value = page.continuationToken
                 totalSongsCountString.value = page.totalCountString
+                hasMoreTracks.value = !page.continuationToken.isNullOrBlank() || page.tracks.size >= 15
             } catch (e: Exception) {
                 if (allTracks.value.isEmpty()) {
                     allTracks.value = a.topTracks
                 }
+                hasMoreTracks.value = false
             } finally {
                 isAllTracksLoading.value = false
             }
@@ -109,26 +112,52 @@ class ArtistViewModel(
     }
 
     fun loadMoreTracks() {
-        val token = allTracksContinuationToken.value ?: return
         val a = uiState.value.artist ?: return
-        if (isLoadingMoreTracks.value) return
+        if (isLoadingMoreTracks.value || !hasMoreTracks.value) return
+
+        val token = allTracksContinuationToken.value
 
         viewModelScope.launch {
             isLoadingMoreTracks.value = true
             try {
-                val page = repository.getArtistTracksContinuation(
-                    continuationToken = token,
-                    artistName = a.name,
-                    artistId = a.channelId
-                )
-                if (page.tracks.isNotEmpty()) {
+                var addedCount = 0
+                if (!token.isNullOrBlank()) {
+                    val page = repository.getArtistTracksContinuation(
+                        continuationToken = token,
+                        artistName = a.name,
+                        artistId = a.channelId
+                    )
+                    if (page.tracks.isNotEmpty()) {
+                        val existingIds = allTracks.value.map { it.id }.toSet()
+                        val newTracks = page.tracks.filter { !existingIds.contains(it.id) }
+                        addedCount = newTracks.size
+                        allTracks.value = allTracks.value + newTracks
+                    }
+                    allTracksContinuationToken.value = page.continuationToken
+                    if (page.continuationToken.isNullOrBlank() && addedCount == 0) {
+                        // Попытка найти дополнительные треки через расширенный поиск
+                        val searchResults = repository.searchTracks(a.name, limit = allTracks.value.size + 50)
+                        val existingIds = allTracks.value.map { it.id }.toSet()
+                        val newTracks = searchResults.filter { !existingIds.contains(it.id) }
+                        if (newTracks.isNotEmpty()) {
+                            allTracks.value = allTracks.value + newTracks
+                        } else {
+                            hasMoreTracks.value = false
+                        }
+                    }
+                } else {
+                    // Токен отсутствует, загружаем следующую порцию через расширенный поиск артиста
+                    val searchResults = repository.searchTracks(a.name, limit = allTracks.value.size + 50)
                     val existingIds = allTracks.value.map { it.id }.toSet()
-                    val newTracks = page.tracks.filter { !existingIds.contains(it.id) }
-                    allTracks.value = allTracks.value + newTracks
+                    val newTracks = searchResults.filter { !existingIds.contains(it.id) }
+                    if (newTracks.isNotEmpty()) {
+                        allTracks.value = allTracks.value + newTracks
+                    } else {
+                        hasMoreTracks.value = false
+                    }
                 }
-                allTracksContinuationToken.value = page.continuationToken
             } catch (e: Exception) {
-                // ignore
+                hasMoreTracks.value = false
             } finally {
                 isLoadingMoreTracks.value = false
             }

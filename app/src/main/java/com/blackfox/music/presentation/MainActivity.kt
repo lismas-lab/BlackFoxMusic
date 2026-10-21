@@ -754,13 +754,14 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // Стеклянная нижняя навигация
+                        // Стеклянная нижняя навигация (островная)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(64.dp)
-                                .floatingGlass(cornerRadius = 24.dp)
-                                .padding(horizontal = 20.dp),
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .height(62.dp)
+                                .floatingGlass(cornerRadius = 28.dp)
+                                .padding(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.SpaceAround,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
