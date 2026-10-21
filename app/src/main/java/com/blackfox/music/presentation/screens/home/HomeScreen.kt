@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.domain.model.Album
+import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.components.*
 import com.blackfox.music.presentation.screens.search.SearchFilter
@@ -39,6 +40,8 @@ fun HomeScreen(
     onTrackPlay: (track: Track, queue: List<Track>) -> Unit,
     onPlayFavorites: () -> Unit,
     onAlbumClick: (Album) -> Unit,
+    onArtistClick: (Artist) -> Unit,
+    onArtistNameClick: (String, String?) -> Unit,
     onNavigateToMyMusic: () -> Unit,
     onNavigateToFavorites: () -> Unit,
     downloadProgressMap: Map<String, DownloadProgress> = emptyMap(),
@@ -50,6 +53,7 @@ fun HomeScreen(
     val playlists by viewModel.playlists.collectAsState()
     val favorites by viewModel.favoriteTrackIds.collectAsState()
     val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
+    val suggestions by viewModel.suggestions.collectAsState()
 
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
 
@@ -91,10 +95,12 @@ fun HomeScreen(
                     .padding(vertical = 10.dp)
             )
 
-            // Поисковая строка в стиле Liquid Glass
+            // Поисковая строка в стиле Liquid Glass с подсказками
             GlassSearchBar(
                 query = query,
-                onQueryChange = viewModel::onQueryChange
+                onQueryChange = viewModel::onQueryChange,
+                suggestions = suggestions,
+                onSuggestionClick = { viewModel.onSuggestionSelect(it) }
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -325,7 +331,10 @@ fun HomeScreen(
                                 onAddToPlaylistClick = { selectedTrackForPlaylist = track },
                                 onDownloadClick = { viewModel.downloadTrack(track) },
                                 downloadProgress = progress,
-                                isDownloaded = isDownloaded
+                                isDownloaded = isDownloaded,
+                                onArtistClick = { artistName, artistId ->
+                                    onArtistNameClick(artistName, artistId)
+                                }
                             )
                         }
                     }
@@ -333,58 +342,169 @@ fun HomeScreen(
 
                 // ЕСЛИ ПОИСК АКТИВЕН -> ВЫДАЧА РЕЗУЛЬТАТОВ
                 if (query.isNotBlank()) {
-                    // Раздел Альбомов
-                    if (uiState.albums.isNotEmpty()) {
-                        item {
-                            Text(
-                                text = "Альбомы",
-                                color = TextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(vertical = 6.dp)
-                            )
+                    when (selectedFilter) {
+                        SearchFilter.ALL -> {
+                            // 1. Артисты сверху над альбомами и песнями
+                            if (uiState.artists.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Артисты",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
 
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                contentPadding = PaddingValues(vertical = 4.dp)
-                            ) {
-                                items(uiState.albums) { album ->
-                                    AlbumGridItem(
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        contentPadding = PaddingValues(vertical = 4.dp)
+                                    ) {
+                                        items(uiState.artists, key = { it.channelId }) { artist ->
+                                            ArtistGridItem(
+                                                artist = artist,
+                                                onArtistClick = { onArtistClick(artist) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Альбомы
+                            if (uiState.albums.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Альбомы",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                                    )
+
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                        contentPadding = PaddingValues(vertical = 4.dp)
+                                    ) {
+                                        items(uiState.albums, key = { it.browseId }) { album ->
+                                            AlbumGridItem(
+                                                album = album,
+                                                onAlbumClick = { onAlbumClick(album) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Песни (Треки)
+                            if (uiState.tracks.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Песни",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                                    )
+                                }
+
+                                items(uiState.tracks, key = { it.id }) { track ->
+                                    val isFav = favorites.contains(track.id)
+                                    val progress = downloadProgressMap[track.id]
+                                    val isDownloaded = downloadedTrackIds.contains(track.id) || track.isDownloaded
+
+                                    TrackListItem(
+                                        track = track,
+                                        onTrackClick = { onTrackPlay(track, uiState.tracks) },
+                                        isFavorite = isFav,
+                                        onFavoriteToggle = { viewModel.toggleFavorite(track) },
+                                        onAddToPlaylistClick = { selectedTrackForPlaylist = track },
+                                        onDownloadClick = { viewModel.downloadTrack(track) },
+                                        downloadProgress = progress,
+                                        isDownloaded = isDownloaded,
+                                        onArtistClick = { artistName, artistId ->
+                                            onArtistNameClick(artistName, artistId)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        SearchFilter.ARTISTS -> {
+                            // Вертикальный список артистов при фильтре "Артисты"
+                            if (uiState.artists.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Артисты",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(vertical = 6.dp)
+                                    )
+                                }
+
+                                items(uiState.artists, key = { it.channelId }) { artist ->
+                                    ArtistListItem(
+                                        artist = artist,
+                                        onArtistClick = { onArtistClick(artist) }
+                                    )
+                                }
+                            }
+                        }
+
+                        SearchFilter.ALBUMS -> {
+                            // Вертикальный список альбомов при фильтре "Альбомы"
+                            if (uiState.albums.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Альбомы",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(vertical = 6.dp)
+                                    )
+                                }
+
+                                items(uiState.albums, key = { it.browseId }) { album ->
+                                    AlbumListItem(
                                         album = album,
                                         onAlbumClick = { onAlbumClick(album) }
                                     )
                                 }
                             }
                         }
-                    }
 
-                    // Раздел Песен (Треков)
-                    if (uiState.tracks.isNotEmpty()) {
-                        item {
-                            Text(
-                                text = "Песни",
-                                color = TextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
-                            )
-                        }
+                        SearchFilter.SONGS -> {
+                            // Вертикальный список песен при фильтре "Песни"
+                            if (uiState.tracks.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Песни",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(vertical = 6.dp)
+                                    )
+                                }
 
-                        items(uiState.tracks, key = { it.id }) { track ->
-                            val isFav = favorites.contains(track.id)
-                            val progress = downloadProgressMap[track.id]
-                            val isDownloaded = downloadedTrackIds.contains(track.id) || track.isDownloaded
+                                items(uiState.tracks, key = { it.id }) { track ->
+                                    val isFav = favorites.contains(track.id)
+                                    val progress = downloadProgressMap[track.id]
+                                    val isDownloaded = downloadedTrackIds.contains(track.id) || track.isDownloaded
 
-                            TrackListItem(
-                                track = track,
-                                onTrackClick = { onTrackPlay(track, uiState.tracks) },
-                                isFavorite = isFav,
-                                onFavoriteToggle = { viewModel.toggleFavorite(track) },
-                                onAddToPlaylistClick = { selectedTrackForPlaylist = track },
-                                onDownloadClick = { viewModel.downloadTrack(track) },
-                                downloadProgress = progress,
-                                isDownloaded = isDownloaded
-                            )
+                                    TrackListItem(
+                                        track = track,
+                                        onTrackClick = { onTrackPlay(track, uiState.tracks) },
+                                        isFavorite = isFav,
+                                        onFavoriteToggle = { viewModel.toggleFavorite(track) },
+                                        onAddToPlaylistClick = { selectedTrackForPlaylist = track },
+                                        onDownloadClick = { viewModel.downloadTrack(track) },
+                                        downloadProgress = progress,
+                                        isDownloaded = isDownloaded,
+                                        onArtistClick = { artistName, artistId ->
+                                            onArtistNameClick(artistName, artistId)
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -9,6 +9,7 @@ import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.data.repository.PlaylistRepository
 import com.blackfox.music.domain.model.Album
+import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -17,12 +18,14 @@ import kotlinx.coroutines.launch
 enum class SearchFilter(val label: String) {
     ALL("Все"),
     SONGS("Песни"),
+    ARTISTS("Артисты"),
     ALBUMS("Альбомы")
 }
 
 data class SearchUiState(
     val isLoading: Boolean = false,
     val tracks: List<Track> = emptyList(),
+    val artists: List<Artist> = emptyList(),
     val albums: List<Album> = emptyList(),
     val error: String? = null
 )
@@ -38,6 +41,7 @@ class SearchViewModel(
     val query = MutableStateFlow("")
     val selectedFilter = MutableStateFlow(SearchFilter.ALL)
     val uiState = MutableStateFlow(SearchUiState())
+    val suggestions = MutableStateFlow<List<String>>(emptyList())
 
     val playlists: StateFlow<List<PlaylistEntity>> = musicDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -58,13 +62,35 @@ class SearchViewModel(
             .distinctUntilChanged()
             .onEach { performSearch(it, selectedFilter.value) }
             .launchIn(viewModelScope)
+
+        query.debounce(150)
+            .onEach { q ->
+                if (q.trim().length >= 2) {
+                    val list = repository.getSearchSuggestions(q.trim())
+                    suggestions.value = list
+                } else {
+                    suggestions.value = emptyList()
+                }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun onQueryChange(newQuery: String) {
         query.value = newQuery
         if (newQuery.isBlank()) {
             uiState.value = SearchUiState()
+            suggestions.value = emptyList()
         }
+    }
+
+    fun onSuggestionSelect(suggestion: String) {
+        query.value = suggestion
+        suggestions.value = emptyList()
+        performSearch(suggestion, selectedFilter.value)
+    }
+
+    fun clearSuggestions() {
+        suggestions.value = emptyList()
     }
 
     fun onFilterSelect(filter: SearchFilter) {
@@ -81,10 +107,12 @@ class SearchViewModel(
                 when (filter) {
                     SearchFilter.ALL -> {
                         val songs = repository.searchTracks(searchQuery, limit = 10)
+                        val artists = repository.searchArtists(searchQuery, limit = 6)
                         val albums = repository.searchAlbums(searchQuery, limit = 8)
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = songs,
+                            artists = artists,
                             albums = albums
                         )
                     }
@@ -93,6 +121,16 @@ class SearchViewModel(
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = songs,
+                            artists = emptyList(),
+                            albums = emptyList()
+                        )
+                    }
+                    SearchFilter.ARTISTS -> {
+                        val artists = repository.searchArtists(searchQuery, limit = 25)
+                        uiState.value = SearchUiState(
+                            isLoading = false,
+                            tracks = emptyList(),
+                            artists = artists,
                             albums = emptyList()
                         )
                     }
@@ -101,6 +139,7 @@ class SearchViewModel(
                         uiState.value = SearchUiState(
                             isLoading = false,
                             tracks = emptyList(),
+                            artists = emptyList(),
                             albums = albums
                         )
                     }

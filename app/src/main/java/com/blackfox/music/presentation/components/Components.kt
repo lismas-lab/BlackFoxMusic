@@ -13,6 +13,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.NorthWest
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.download.DownloadStatus
@@ -34,73 +37,123 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.blackfox.music.domain.model.Album
+import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
 
 /**
- * Стеклянная поисковая строка в стиле Liquid Glass
+ * Стеклянная поисковая строка в стиле Liquid Glass с поддержкой подсказок
  */
 @Composable
 fun GlassSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
-    placeholder: String = "Поиск песен, альбомов, артистов..."
+    placeholder: String = "Поиск песен, альбомов, артистов...",
+    suggestions: List<String> = emptyList(),
+    onSuggestionClick: (String) -> Unit = {}
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(54.dp)
-            .liquidGlass(cornerRadius = 22.dp, backgroundColor = Color(0x18FFFFFF))
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .liquidGlass(cornerRadius = 22.dp, backgroundColor = Color(0x18FFFFFF))
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Поиск",
-                tint = if (query.isNotBlank()) FoxOrange else TextSecondary,
-                modifier = Modifier.size(22.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Поиск",
+                    tint = if (query.isNotBlank()) FoxOrange else TextSecondary,
+                    modifier = Modifier.size(22.dp)
+                )
 
-            Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-            Box(modifier = Modifier.weight(1f)) {
-                if (query.isEmpty()) {
-                    Text(
-                        text = placeholder,
-                        color = TextMuted,
-                        fontSize = 15.sp
+                Box(modifier = Modifier.weight(1f)) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            color = TextMuted,
+                            fontSize = 15.sp
+                        )
+                    }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(FoxOrange),
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    cursorBrush = SolidColor(FoxOrange),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
 
-            if (query.isNotEmpty()) {
-                IconButton(
-                    onClick = { onQueryChange("") },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Clear,
-                        contentDescription = "Очистить",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
+                if (query.isNotEmpty()) {
+                    IconButton(
+                        onClick = { onQueryChange("") },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Очистить",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Всплывающее меню поисковых подсказок API
+        if (suggestions.isNotEmpty() && query.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .liquidGlass(cornerRadius = 18.dp, backgroundColor = Color(0x351C1D22))
+                    .padding(vertical = 4.dp)
+            ) {
+                suggestions.take(5).forEach { suggestion ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSuggestionClick(suggestion) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = FoxOrange,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = suggestion,
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            imageVector = Icons.Default.NorthWest,
+                            contentDescription = null,
+                            tint = TextMuted,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
         }
@@ -120,6 +173,7 @@ fun TrackListItem(
     onDownloadClick: () -> Unit,
     downloadProgress: DownloadProgress? = null,
     isDownloaded: Boolean = track.isDownloaded,
+    onArtistClick: ((artistName: String, artistId: String?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val heartColor by animateColorAsState(
@@ -179,10 +233,13 @@ fun TrackListItem(
 
                 Text(
                     text = "${track.artist}${if (track.duration.isNotBlank()) " • ${track.duration}" else ""}",
-                    color = TextSecondary,
+                    color = if (onArtistClick != null) FoxOrange.copy(alpha = 0.9f) else TextSecondary,
                     fontSize = 13.sp,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (onArtistClick != null) {
+                        Modifier.clickable { onArtistClick(track.artist, track.artistId) }
+                    } else Modifier
                 )
             }
         }
@@ -340,6 +397,202 @@ fun AlbumGridItem(
             fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * Круглая карточка артиста для горизонтальной ленты в разделе "Все"
+ */
+@Composable
+fun ArtistGridItem(
+    artist: Artist,
+    onArtistClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .width(105.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onArtistClick)
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(76.dp)
+                .clip(CircleShape)
+                .background(ObsidianCard),
+            contentAlignment = Alignment.Center
+        ) {
+            if (artist.avatarUrl.isNotBlank()) {
+                AsyncImage(
+                    model = artist.avatarUrl,
+                    contentDescription = artist.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = artist.name,
+                    tint = FoxOrange,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = artist.name,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Text(
+            text = if (artist.subscribers.isNotBlank()) artist.subscribers else "Исполнитель",
+            color = TextSecondary,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * Карточка артиста для вертикального списка при фильтре "Артисты"
+ */
+@Composable
+fun ArtistListItem(
+    artist: Artist,
+    onArtistClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .liquidGlass(cornerRadius = 16.dp, backgroundColor = Color(0x12FFFFFF))
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onArtistClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(ObsidianCard),
+            contentAlignment = Alignment.Center
+        ) {
+            if (artist.avatarUrl.isNotBlank()) {
+                AsyncImage(
+                    model = artist.avatarUrl,
+                    contentDescription = artist.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = artist.name,
+                    tint = FoxOrange,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = artist.name,
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = if (artist.subscribers.isNotBlank()) "${artist.subscribers} • Исполнитель" else "Исполнитель",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowRight,
+            contentDescription = "Перейти к артисту",
+            tint = TextMuted,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
+/**
+ * Карточка альбома для вертикального списка при фильтре "Альбомы"
+ */
+@Composable
+fun AlbumListItem(
+    album: Album,
+    onAlbumClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .liquidGlass(cornerRadius = 16.dp, backgroundColor = Color(0x12FFFFFF))
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onAlbumClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = album.coverUrl,
+            contentDescription = album.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(ObsidianCard)
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = album.title,
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "${album.artist}${if (album.year.isNotBlank()) " • ${album.year}" else ""}${if (album.type.isNotBlank()) " • ${album.type}" else ""}",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowRight,
+            contentDescription = "Открыть альбом",
+            tint = TextMuted,
+            modifier = Modifier.size(24.dp)
         )
     }
 }

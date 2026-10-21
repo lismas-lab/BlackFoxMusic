@@ -37,11 +37,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.blackfox.music.BlackFoxApp
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.InnerTubeRepository
+import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.components.AddToPlaylistBottomSheet
 import com.blackfox.music.presentation.components.FloatingMiniPlayer
 import com.blackfox.music.presentation.screens.album.AlbumScreen
 import com.blackfox.music.presentation.screens.album.AlbumViewModel
+import com.blackfox.music.presentation.screens.artist.ArtistScreen
+import com.blackfox.music.presentation.screens.artist.ArtistViewModel
 import com.blackfox.music.presentation.screens.home.HomeScreen
 import com.blackfox.music.presentation.screens.mymusic.FavoritesDetailScreen
 import com.blackfox.music.presentation.screens.mymusic.MyMusicScreen
@@ -99,6 +102,8 @@ class MainActivity : ComponentActivity() {
                 // Навигационные состояния
                 var currentTab by remember { mutableStateOf(MainTab.HOME) }
                 var selectedAlbumBrowseId by remember { mutableStateOf<String?>(null) }
+                var selectedArtistId by remember { mutableStateOf<String?>(null) }
+                var selectedArtistName by remember { mutableStateOf<String?>(null) }
                 var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
                 var isFavoritesOpen by remember { mutableStateOf(false) }
                 var isFullPlayerVisible by remember { mutableStateOf(false) }
@@ -107,11 +112,16 @@ class MainActivity : ComponentActivity() {
                 // Жест "Назад" и системная кнопка "Назад"
                 BackHandler(
                     enabled = isFullPlayerVisible || selectedAlbumBrowseId != null ||
+                            selectedArtistId != null || selectedArtistName != null ||
                             selectedPlaylistId != null || isFavoritesOpen || currentTab != MainTab.HOME
                 ) {
                     when {
                         isFullPlayerVisible -> isFullPlayerVisible = false
                         selectedAlbumBrowseId != null -> selectedAlbumBrowseId = null
+                        selectedArtistId != null || selectedArtistName != null -> {
+                            selectedArtistId = null
+                            selectedArtistName = null
+                        }
                         selectedPlaylistId != null -> selectedPlaylistId = null
                         isFavoritesOpen -> isFavoritesOpen = false
                         currentTab != MainTab.HOME -> currentTab = MainTab.HOME
@@ -242,6 +252,35 @@ class MainActivity : ComponentActivity() {
                                 onPlayTrack = { track ->
                                     val albumTracks = albumViewModel.uiState.value.album?.tracks ?: listOf(track)
                                     playTrackInQueue(track, albumTracks)
+                                },
+                                downloadProgressMap = downloadProgressMap
+                            )
+                        }
+
+                        // Экран Артиста
+                        selectedArtistId != null || selectedArtistName != null -> {
+                            val artistViewModel = remember(selectedArtistId, selectedArtistName) {
+                                ArtistViewModel(
+                                    channelId = selectedArtistId ?: "",
+                                    initialName = selectedArtistName ?: "",
+                                    repository = repository,
+                                    downloadManager = downloadManager,
+                                    playlistRepository = playlistRepository,
+                                    musicDao = musicDao
+                                )
+                            }
+
+                            ArtistScreen(
+                                viewModel = artistViewModel,
+                                onBackClick = {
+                                    selectedArtistId = null
+                                    selectedArtistName = null
+                                },
+                                onPlayTrack = { track, queue ->
+                                    playTrackInQueue(track, queue)
+                                },
+                                onAlbumClick = { album ->
+                                    selectedAlbumBrowseId = album.browseId
                                 },
                                 downloadProgressMap = downloadProgressMap
                             )
@@ -386,6 +425,14 @@ class MainActivity : ComponentActivity() {
                                         onAlbumClick = { album ->
                                             selectedAlbumBrowseId = album.browseId
                                         },
+                                        onArtistClick = { artist ->
+                                            selectedArtistId = artist.channelId
+                                            selectedArtistName = artist.name
+                                        },
+                                        onArtistNameClick = { name, id ->
+                                            selectedArtistId = id
+                                            selectedArtistName = name
+                                        },
                                         onNavigateToMyMusic = { currentTab = MainTab.MY_MUSIC },
                                         onNavigateToFavorites = { isFavoritesOpen = true },
                                         downloadProgressMap = downloadProgressMap
@@ -473,6 +520,8 @@ class MainActivity : ComponentActivity() {
                             MainTab.entries.forEach { tab ->
                                 val isSelected = currentTab == tab &&
                                         selectedAlbumBrowseId == null &&
+                                        selectedArtistId == null &&
+                                        selectedArtistName == null &&
                                         selectedPlaylistId == null &&
                                         !isFavoritesOpen
 
@@ -482,6 +531,8 @@ class MainActivity : ComponentActivity() {
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
                                             selectedAlbumBrowseId = null
+                                            selectedArtistId = null
+                                            selectedArtistName = null
                                             selectedPlaylistId = null
                                             isFavoritesOpen = false
                                             currentTab = tab
@@ -527,7 +578,13 @@ class MainActivity : ComponentActivity() {
                                 onFavoriteToggle = { toggleFavorite(track) },
                                 onDownloadClick = { downloadManager.downloadTrack(track) },
                                 onAddToPlaylistClick = { trackForPlaylistSheet = track },
-                                onCloseClick = { isFullPlayerVisible = false }
+                                onCloseClick = { isFullPlayerVisible = false },
+                                onArtistClick = { name, id ->
+                                    isFullPlayerVisible = false
+                                    selectedArtistId = id
+                                    selectedArtistName = name
+                                },
+                                repository = repository
                             )
                         }
                     }
