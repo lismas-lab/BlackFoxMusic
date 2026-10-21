@@ -163,7 +163,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "Версия 0.1.4",
+                                    text = "Версия 0.2.0",
                                     color = TextSecondary,
                                     fontSize = 13.sp
                                 )
