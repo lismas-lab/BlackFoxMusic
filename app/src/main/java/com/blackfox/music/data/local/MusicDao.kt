@@ -16,6 +16,9 @@ interface MusicDao {
     @Query("SELECT * FROM tracks WHERE id = :trackId")
     suspend fun getTrackById(trackId: String): TrackEntity?
 
+    @Query("SELECT * FROM tracks WHERE LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist) LIMIT 1")
+    suspend fun findTrackByTitleAndArtist(title: String, artist: String): TrackEntity?
+
     @Query("SELECT * FROM tracks WHERE isDownloaded = 1 ORDER BY downloadedAt DESC")
     fun getDownloadedTracks(): Flow<List<TrackEntity>>
 
@@ -161,6 +164,12 @@ interface MusicDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM followed_artists WHERE channelId = :channelId)")
     fun isArtistFollowed(channelId: String): Flow<Boolean>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM followed_artists WHERE channelId = :channelId)")
+    suspend fun isArtistFollowedDirect(channelId: String): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM followed_artists WHERE LOWER(name) = LOWER(:name))")
+    suspend fun isArtistFollowedByName(name: String): Boolean
 
     @Query("SELECT * FROM followed_artists ORDER BY followedAt DESC")
     fun getAllFollowedArtists(): Flow<List<ArtistEntity>>

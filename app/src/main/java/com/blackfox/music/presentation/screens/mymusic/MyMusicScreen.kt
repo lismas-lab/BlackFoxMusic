@@ -71,6 +71,7 @@ fun MyMusicScreen(
     onDownloadTrack: (Track) -> Unit = {},
     currentTrack: Track? = null,
     isPlaying: Boolean = false,
+    onOpenMigration: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -118,29 +119,62 @@ fun MyMusicScreen(
                     fontWeight = FontWeight.Bold
                 )
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .liquidGlass(cornerRadius = 14.dp, backgroundColor = Color(0x22FFFFFF))
-                        .clickable { isCreateDialogOpen = true }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    // Кнопка миграции из VK
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .liquidGlass(cornerRadius = 14.dp, backgroundColor = Color(0x22FFFFFF))
+                            .clickable { onOpenMigration() }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Новый плейлист",
-                            tint = accentColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Плейлист",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = "Миграция из VK",
+                                tint = accentColor,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Text(
+                                text = "Импорт VK",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // Кнопка нового плейлиста
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .liquidGlass(cornerRadius = 14.dp, backgroundColor = Color(0x22FFFFFF))
+                            .clickable { isCreateDialogOpen = true }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Новый плейлист",
+                                tint = accentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Плейлист",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }

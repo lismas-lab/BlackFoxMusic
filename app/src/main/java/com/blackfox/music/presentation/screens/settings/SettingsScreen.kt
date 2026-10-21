@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +42,7 @@ fun SettingsScreen(
     musicDao: MusicDao,
     playlistRepository: PlaylistRepository,
     onClearAllDownloads: () -> Unit,
+    onOpenVkMigration: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -332,21 +334,14 @@ fun SettingsScreen(
                             subtitle = "Перенос плейлистов и аудиозаписей из ВКонтакте",
                             iconTint = currentAccent.color,
                             trailing = {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(currentAccent.color.copy(alpha = 0.15f))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "Скоро",
-                                        color = currentAccent.color,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             },
-                            onClick = { isVkMigrationDialogOpen = true }
+                            onClick = { onOpenVkMigration() }
                         )
                     }
                 }

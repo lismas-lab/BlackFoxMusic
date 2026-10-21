@@ -38,6 +38,7 @@ import com.blackfox.music.BlackFoxApp
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.local.toDomain
 import com.blackfox.music.data.network.InnerTubeRepository
+import com.blackfox.music.data.network.VkRepository
 import com.blackfox.music.domain.model.Artist
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.components.AddToPlaylistBottomSheet
@@ -47,6 +48,8 @@ import com.blackfox.music.presentation.screens.album.AlbumViewModel
 import com.blackfox.music.presentation.screens.artist.ArtistScreen
 import com.blackfox.music.presentation.screens.artist.ArtistViewModel
 import com.blackfox.music.presentation.screens.home.HomeScreen
+import com.blackfox.music.presentation.screens.migration.VkMigrationScreen
+import com.blackfox.music.presentation.screens.migration.VkMigrationViewModel
 import com.blackfox.music.presentation.screens.mymusic.DownloadedTracksScreen
 import com.blackfox.music.presentation.screens.mymusic.FavoritesDetailScreen
 import com.blackfox.music.presentation.screens.mymusic.FollowedArtistsScreen
@@ -118,18 +121,20 @@ class MainActivity : ComponentActivity() {
                 var isDownloadedOpen by remember { mutableStateOf(false) }
                 var isUploadedOpen by remember { mutableStateOf(false) }
                 var isFollowedArtistsOpen by remember { mutableStateOf(false) }
+                var isVkMigrationOpen by remember { mutableStateOf(false) }
                 var isFullPlayerVisible by remember { mutableStateOf(false) }
                 var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
 
                 // Жест "Назад" и системная кнопка "Назад"
                 BackHandler(
-                    enabled = isFullPlayerVisible || selectedAlbumBrowseId != null ||
+                    enabled = isFullPlayerVisible || isVkMigrationOpen || selectedAlbumBrowseId != null ||
                             selectedArtistId != null || selectedArtistName != null ||
                             selectedPlaylistId != null || isFavoritesOpen || isDownloadedOpen || isUploadedOpen ||
                             isFollowedArtistsOpen || currentTab != MainTab.HOME
                 ) {
                     when {
                         isFullPlayerVisible -> isFullPlayerVisible = false
+                        isVkMigrationOpen -> isVkMigrationOpen = false
                         selectedAlbumBrowseId != null -> selectedAlbumBrowseId = null
                         selectedArtistId != null || selectedArtistName != null -> {
                             selectedArtistId = null
@@ -224,6 +229,17 @@ class MainActivity : ComponentActivity() {
                         musicDao = musicDao,
                         downloadManager = downloadManager,
                         playlistRepository = playlistRepository
+                    )
+                }
+
+                val vkRepository = remember { VkRepository() }
+                val vkMigrationViewModel = remember {
+                    VkMigrationViewModel(
+                        vkRepository = vkRepository,
+                        innerTubeRepository = repository,
+                        playlistRepository = playlistRepository,
+                        musicDao = musicDao,
+                        downloadManager = downloadManager
                     )
                 }
 
@@ -668,6 +684,18 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        // Экран миграции из VK Music
+                        isVkMigrationOpen -> {
+                            VkMigrationScreen(
+                                viewModel = vkMigrationViewModel,
+                                onBackClick = { isVkMigrationOpen = false },
+                                onFinish = {
+                                    isVkMigrationOpen = false
+                                    currentTab = MainTab.MY_MUSIC
+                                }
+                            )
+                        }
+
                         // Вкладки нижнего меню
                         else -> {
                             when (currentTab) {
@@ -752,6 +780,7 @@ class MainActivity : ComponentActivity() {
                                         onToggleFavorite = { track -> toggleFavorite(track) },
                                         onAddToPlaylist = { track -> trackForPlaylistSheet = track },
                                         onDownloadTrack = { downloadManager.downloadTrack(it) },
+                                        onOpenMigration = { isVkMigrationOpen = true },
                                         currentTrack = currentTrack,
                                         isPlaying = isPlaying
                                     )
@@ -771,7 +800,8 @@ class MainActivity : ComponentActivity() {
                                                 downloadManager.clearAllDownloaded()
                                                 storageSizeBytes = 0L
                                             }
-                                        }
+                                        },
+                                        onOpenVkMigration = { isVkMigrationOpen = true }
                                     )
                                 }
                             }
