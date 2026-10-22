@@ -1537,7 +1537,7 @@ private fun ManualSearchDialog(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             items(searchResults, key = { it.id }) { track ->
-                                val isVideo = track.album == "Видео / Без цензуры" || track.artistId?.startsWith("UC") == true
+                                val isVideo = track.album == "Видео / Без цензуры"
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()

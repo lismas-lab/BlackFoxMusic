@@ -302,7 +302,8 @@ class VkMigrationViewModel(
                         if (seenIds.add(s.id)) combined.add(s)
                     }
                     for (v in videos) {
-                        if (seenIds.add(v.id)) combined.add(v)
+                        val videoTrack = if (v.album != "Видео / Без цензуры") v.copy(album = "Видео / Без цензуры") else v
+                        if (seenIds.add(videoTrack.id)) combined.add(videoTrack)
                     }
                     combined
                 }
@@ -311,7 +312,9 @@ class VkMigrationViewModel(
                 runCatching { innerTubeRepository.searchTracks(q, limit = 25) }.getOrDefault(emptyList())
             }
             MigrationSearchFilter.VIDEOS -> {
-                runCatching { innerTubeRepository.searchVideos(q, limit = 25) }.getOrDefault(emptyList())
+                runCatching { innerTubeRepository.searchVideos(q, limit = 25) }.getOrDefault(emptyList()).map {
+                    if (it.album != "Видео / Без цензуры") it.copy(album = "Видео / Без цензуры") else it
+                }
             }
         }
     }
