@@ -12,6 +12,8 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.regex.Pattern
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
@@ -1388,7 +1390,32 @@ class InnerTubeRepository {
         emptyList()
     }
 
-    suspend fun getLyrics(trackId: String): Pair<String, String>? = withContext(Dispatchers.IO) {
+    suspend fun getLyrics(
+        trackId: String,
+        title: String = "",
+        artist: String = "",
+        durationSeconds: Long = 0
+    ): Pair<String, String>? = withContext(Dispatchers.IO) {
+        // 1. Первоочередно: официальный текст из YouTube Music
+        if (trackId.isNotBlank() && !trackId.startsWith("local_")) {
+            val ytLyrics = getLyricsFromYouTube(trackId)
+            if (ytLyrics != null && ytLyrics.first.isNotBlank()) {
+                return@withContext ytLyrics
+            }
+        }
+
+        // 2. Альтернативный поиск текста песни через открытую базу LRCLIB
+        if (title.isNotBlank()) {
+            val altLyrics = getLyricsFromLrclib(title, artist, durationSeconds)
+            if (altLyrics != null && altLyrics.first.isNotBlank()) {
+                return@withContext altLyrics
+            }
+        }
+
+        null
+    }
+
+    private suspend fun getLyricsFromYouTube(trackId: String): Pair<String, String>? = withContext(Dispatchers.IO) {
         try {
             val nextPayload = JSONObject().apply {
                 put("videoId", trackId)
@@ -1444,6 +1471,167 @@ class InnerTubeRepository {
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun cleanTitleAndArtist(rawTitle: String, rawArtist: String): Pair<String, String> {
+        var cleanTitle = rawTitle
+            .replace(Regex("(?i)\\((?:official\\s+(?:music\\s+)?video|official\\s+audio|audio|clip|video|visualizer|remastered[^)]*|lyrics?)\\)"), "")
+            .replace(Regex("(?i)\\[(?:official\\s+(?:music\\s+)?video|official\\s+audio|audio|clip|video|visualizer|remastered[^]]*|lyrics?)\\]"), "")
+            .replace(Regex("(?i)\\b(?:4k|hd|hq|60fps)\\b"), "")
+            .replace(Regex("(?i)\\s*\\(?(?:feat\\.|ft\\.|featuring)[^)]*\\)?"), "")
+            .trim()
+
+        var cleanArtist = rawArtist.trim()
+
+        if (cleanTitle.contains(" - ") && (cleanArtist.isBlank() || cleanArtist.contains("Topic", ignoreCase = true) || cleanArtist.equals("Various Artists", true))) {
+            val parts = cleanTitle.split(" - ", limit = 2)
+            cleanArtist = parts[0].trim()
+            cleanTitle = parts[1].trim()
+        }
+
+        cleanTitle = cleanTitle.removeSurrounding("\"").removeSurrounding("'").trim()
+        cleanArtist = cleanArtist.removeSurrounding("\"").removeSurrounding("'").trim()
+
+        return Pair(cleanTitle, cleanArtist)
+    }
+
+    private suspend fun getLyricsFromLrclib(
+        title: String,
+        artist: String,
+        durationSeconds: Long = 0
+    ): Pair<String, String>? = withContext(Dispatchers.IO) {
+        val (cleanTitle, cleanArtist) = cleanTitleAndArtist(title, artist)
+        if (cleanTitle.isBlank()) return@withContext null
+
+        try {
+            // 1. Попытка прямого точного совпадения /api/get
+            val getUrlBuilder = StringBuilder("https://lrclib.net/api/get?")
+            getUrlBuilder.append("track_name=").append(URLEncoder.encode(cleanTitle, StandardCharsets.UTF_8.name()))
+            if (cleanArtist.isNotBlank()) {
+                getUrlBuilder.append("&artist_name=").append(URLEncoder.encode(cleanArtist, StandardCharsets.UTF_8.name()))
+            }
+            if (durationSeconds > 0) {
+                getUrlBuilder.append("&duration=").append(durationSeconds)
+            }
+
+            val lyrics = fetchLyricsFromUrl(getUrlBuilder.toString())
+            if (lyrics != null && lyrics.first.isNotBlank()) {
+                return@withContext lyrics
+            }
+
+            // 2. Попытка поиска через /api/search с track_name и artist_name
+            val searchUrlBuilder = StringBuilder("https://lrclib.net/api/search?")
+            searchUrlBuilder.append("track_name=").append(URLEncoder.encode(cleanTitle, StandardCharsets.UTF_8.name()))
+            if (cleanArtist.isNotBlank()) {
+                searchUrlBuilder.append("&artist_name=").append(URLEncoder.encode(cleanArtist, StandardCharsets.UTF_8.name()))
+            }
+            val searchLyrics = fetchSearchLyricsFromUrl(searchUrlBuilder.toString())
+            if (searchLyrics != null && searchLyrics.first.isNotBlank()) {
+                return@withContext searchLyrics
+            }
+
+            // 3. Попытка общего поиска по строке "Артист Название"
+            val broadQuery = if (cleanArtist.isNotBlank()) "$cleanArtist $cleanTitle" else cleanTitle
+            val broadUrl = "https://lrclib.net/api/search?q=" + URLEncoder.encode(broadQuery, StandardCharsets.UTF_8.name())
+            val broadLyrics = fetchSearchLyricsFromUrl(broadUrl)
+            if (broadLyrics != null && broadLyrics.first.isNotBlank()) {
+                return@withContext broadLyrics
+            }
+        } catch (e: Exception) {
+            // Fallback
+        }
+
+        null
+    }
+
+    /**
+     * Пользовательский альтернативный поиск текста песни по произвольному запросу
+     */
+    suspend fun searchAlternativeLyrics(query: String): Pair<String, String>? = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext null
+        try {
+            val url = "https://lrclib.net/api/search?q=" + URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.name())
+            return@withContext fetchSearchLyricsFromUrl(url)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun fetchLyricsFromUrl(urlStr: String): Pair<String, String>? {
+        return try {
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "BlackFoxMusic/1.2.1 (Android; https://github.com/lismas-lab/BlackFoxMusic)")
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 8_000
+
+            if (conn.responseCode == 200) {
+                val responseStr = conn.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+                val json = JSONObject(responseStr)
+                extractLyricsFromJson(json)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun fetchSearchLyricsFromUrl(urlStr: String): Pair<String, String>? {
+        return try {
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "BlackFoxMusic/1.2.1 (Android; https://github.com/lismas-lab/BlackFoxMusic)")
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 8_000
+
+            if (conn.responseCode == 200) {
+                val responseStr = conn.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+                val jsonArray = JSONArray(responseStr)
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.optJSONObject(i) ?: continue
+                    val lyrics = extractLyricsFromJson(obj)
+                    if (lyrics != null && lyrics.first.isNotBlank()) {
+                        return lyrics
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun extractLyricsFromJson(json: JSONObject): Pair<String, String>? {
+        val plainLyrics = json.optString("plainLyrics").trim()
+        if (plainLyrics.isNotBlank()) {
+            val trackName = json.optString("trackName")
+            val artistName = json.optString("artistName")
+            val footer = if (trackName.isNotBlank() && artistName.isNotBlank()) {
+                "Текст: $artistName — $trackName (LRCLIB)"
+            } else {
+                "Источник: LRCLIB"
+            }
+            return Pair(plainLyrics, footer)
+        }
+
+        val syncedLyrics = json.optString("syncedLyrics").trim()
+        if (syncedLyrics.isNotBlank()) {
+            val stripped = syncedLyrics.replace(Regex("\\[\\d{2}:\\d{2}\\.\\d{2,3}\\]\\s*"), "").trim()
+            if (stripped.isNotBlank()) {
+                val trackName = json.optString("trackName")
+                val artistName = json.optString("artistName")
+                val footer = if (trackName.isNotBlank() && artistName.isNotBlank()) {
+                    "Текст: $artistName — $trackName (LRCLIB)"
+                } else {
+                    "Источник: LRCLIB"
+                }
+                return Pair(stripped, footer)
+            }
+        }
+        return null
     }
 
     suspend fun getSearchSuggestions(query: String): List<String> = withContext(Dispatchers.IO) {

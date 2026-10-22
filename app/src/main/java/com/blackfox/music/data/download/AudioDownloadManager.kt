@@ -230,7 +230,21 @@ class AudioDownloadManager(
             }
 
             // Атомарно переименовываем в финальный файл
-            if (tempFile.exists() && tempFile.length() > 0) {
+            if (tempFile.exists() && tempFile.length() >= 50_000L) {
+                val isHtmlError = try {
+                    val header = ByteArray(512)
+                    tempFile.inputStream().use { it.read(header) }
+                    val headerStr = String(header, Charsets.UTF_8).lowercase()
+                    headerStr.contains("<!doctype html") || headerStr.contains("<html") || headerStr.contains("<head>")
+                } catch (e: Exception) {
+                    false
+                }
+
+                if (isHtmlError) {
+                    tempFile.delete()
+                    throw IOException("Сервер вернул HTML-страницу ошибки вместо аудиопотока")
+                }
+
                 // Удаляем файлы других форматов для этого trackId, если они существовали ранее
                 File(musicDirectory, "${track.id}.mp3").takeIf { it.exists() && it != finalFile }?.delete()
                 File(musicDirectory, "${track.id}.m4a").takeIf { it.exists() && it != finalFile }?.delete()
@@ -240,7 +254,9 @@ class AudioDownloadManager(
                 if (finalFile.exists()) finalFile.delete()
                 tempFile.renameTo(finalFile)
             } else {
-                throw IOException("Файл скачался пустым")
+                val size = if (tempFile.exists()) tempFile.length() else 0L
+                tempFile.delete()
+                throw IOException("Файл скачался не полностью ($size байт)")
             }
 
             // 4. Скачиваем обложку для оффлайна

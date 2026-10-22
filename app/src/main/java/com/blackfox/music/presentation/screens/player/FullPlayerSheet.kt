@@ -44,6 +44,7 @@ import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Полноэкранный плеер в стиле Liquid Glass с выдвижной шторкой текста песни (свайп снизу вверх),
@@ -80,6 +81,12 @@ fun FullPlayerSheet(
     var lyricsPair by remember { mutableStateOf<Pair<String, String>?>(null) }
     var isLyricsLoading by remember { mutableStateOf(false) }
     var lyricsLoadedTrackId by remember { mutableStateOf<String?>(null) }
+
+    var isManualSearchVisible by remember { mutableStateOf(false) }
+    var manualSearchQuery by remember(track.id) { mutableStateOf("${track.artist} ${track.title}") }
+    var manualSearchError by remember { mutableStateOf<String?>(null) }
+    var isManualSearching by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     var isUncensoredSheetVisible by remember { mutableStateOf(false) }
     var uncensoredVideos by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -133,13 +140,19 @@ fun FullPlayerSheet(
         }
     }
 
-    // Упреждающая загрузка текста песни в фоне сразу при смене трека
+    // Упреждающая загрузка текста песни в фоне сразу при смене трека (YouTube + LRCLIB fallback)
     LaunchedEffect(track.id) {
         if (lyricsLoadedTrackId != track.id) {
             isLyricsLoading = true
             lyricsPair = null
+            manualSearchError = null
             try {
-                lyricsPair = repository.getLyrics(track.id)
+                lyricsPair = repository.getLyrics(
+                    trackId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    durationSeconds = track.durationSeconds
+                )
                 lyricsLoadedTrackId = track.id
             } catch (_: Exception) {
                 lyricsPair = null
@@ -778,15 +791,17 @@ fun FullPlayerSheet(
                         } else {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(32.dp)
+                                modifier = Modifier
+                                    .padding(horizontal = 28.dp, vertical = 20.dp)
+                                    .fillMaxWidth()
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Lyrics,
                                     contentDescription = null,
                                     tint = TextMuted,
-                                    modifier = Modifier.size(56.dp)
+                                    modifier = Modifier.size(52.dp)
                                 )
-                                Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(14.dp))
                                 Text(
                                     text = "Текст для этого трека пока не найден",
                                     color = TextSecondary,
@@ -794,6 +809,131 @@ fun FullPlayerSheet(
                                     fontWeight = FontWeight.Medium,
                                     textAlign = TextAlign.Center
                                 )
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                if (!isManualSearchVisible) {
+                                    Button(
+                                        onClick = {
+                                            isManualSearchVisible = true
+                                            manualSearchQuery = "${track.artist} ${track.title}".trim()
+                                            manualSearchError = null
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = accentColor.copy(alpha = 0.22f)),
+                                        shape = RoundedCornerShape(16.dp),
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = accentColor,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Альтернативный поиск текста",
+                                            color = TextPrimary,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                } else {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .padding(16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "Поиск в открытой базе текста",
+                                            color = TextPrimary,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        OutlinedTextField(
+                                            value = manualSearchQuery,
+                                            onValueChange = {
+                                                manualSearchQuery = it
+                                                manualSearchError = null
+                                            },
+                                            label = { Text("Исполнитель и название песни") },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = accentColor,
+                                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                                focusedTextColor = TextPrimary,
+                                                unfocusedTextColor = TextPrimary,
+                                                focusedLabelColor = accentColor,
+                                                unfocusedLabelColor = TextMuted
+                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+
+                                        if (manualSearchError != null) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = manualSearchError!!,
+                                                color = Color(0xFFFF5252),
+                                                fontSize = 12.sp,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            TextButton(
+                                                onClick = { isManualSearchVisible = false }
+                                            ) {
+                                                Text("Отмена", color = TextMuted)
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Button(
+                                                onClick = {
+                                                    if (manualSearchQuery.isNotBlank()) {
+                                                        isManualSearching = true
+                                                        manualSearchError = null
+                                                        coroutineScope.launch {
+                                                            try {
+                                                                val result = repository.searchAlternativeLyrics(manualSearchQuery)
+                                                                if (result != null && result.first.isNotBlank()) {
+                                                                    lyricsPair = result
+                                                                    isManualSearchVisible = false
+                                                                } else {
+                                                                    manualSearchError = "Текст не найден. Попробуйте изменить название."
+                                                                }
+                                                            } catch (e: Exception) {
+                                                                manualSearchError = "Ошибка поиска: ${e.localizedMessage ?: "Сбой сети"}"
+                                                            } finally {
+                                                                isManualSearching = false
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                enabled = !isManualSearching && manualSearchQuery.isNotBlank(),
+                                                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                if (isManualSearching) {
+                                                    CircularProgressIndicator(
+                                                        color = Color.White,
+                                                        modifier = Modifier.size(16.dp),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                }
+                                                Text("Найти", color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

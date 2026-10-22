@@ -24,6 +24,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionResult
 import com.blackfox.music.data.local.AppSettings
+import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.network.AudioStreamResolver
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.MainActivity
@@ -35,15 +36,21 @@ import java.io.File
 
 class AudioPlayerManager(
     private val context: Context,
+    private val musicDao: MusicDao? = null,
     private val appSettings: AppSettings? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 ) {
+
+    constructor(context: Context, appSettings: AppSettings?) : this(context, null, appSettings)
 
     internal enum class PlaybackEngine {
         NONE, EXOPLAYER, WEBVIEW
     }
 
     internal var activeEngine = PlaybackEngine.NONE
+
+    private var isPlayingLocalFile: Boolean = false
+    private var currentLocalFilePath: String? = null
 
     // 1. Центральный движок ExoPlayer с аудиофокусом, устойчивыми таймаутами для VPN и Wakelock
     @OptIn(UnstableApi::class)
@@ -135,16 +142,35 @@ class AudioPlayerManager(
                         Player.STATE_ENDED -> {
                             val duration = player.duration
                             val currentPos = player.currentPosition
-                            // Проверяем: если воспроизведение завершилось неожиданно далеко от конца трека (например, срыв Range при перемотке онлайн-потока)
-                            if (duration > 0 && currentPos < duration - 2500L) {
+                            val currentTrackValue = _currentTrack.value
+
+                            if (currentPos < 2000L) {
+                                // Воспроизведение завершилось практически сразу на старте (0-2 сек).
+                                // Это признак поврежденного локального файла или моментального обрыва потока!
+                                // Ни в коем случае НЕ вызываем playNext() — иначе трек просто скипнется!
+                                if (isPlayingLocalFile && currentTrackValue != null) {
+                                    handleCorruptLocalFileAndFallback(currentTrackValue)
+                                } else if (currentTrackValue != null) {
+                                    // Онлайн-поток не смог запуститься — пробуем бесшовный fallback на WebView
+                                    activeEngine = PlaybackEngine.WEBVIEW
+                                    player.stop()
+                                    player.clearMediaItems()
+                                    webViewEngine.playTrack(currentTrackValue.id, startPositionMs = 0L)
+                                } else {
+                                    _isPlaying.value = false
+                                    stopExoProgressTicker()
+                                }
+                            } else if (duration > 0 && currentPos < duration - 2500L) {
+                                // Воспроизведение неожиданно сорвалось далеко от конца трека (срыв Range при перемотке)
                                 val savedPos = _currentPositionMs.value
                                 activeEngine = PlaybackEngine.WEBVIEW
                                 player.stop()
                                 player.clearMediaItems()
-                                _currentTrack.value?.let { tr ->
+                                currentTrackValue?.let { tr ->
                                     webViewEngine.playTrack(tr.id, startPositionMs = savedPos)
                                 }
                             } else {
+                                // Трек успешно доиграл до конца — переходим к следующему
                                 _isPlaying.value = false
                                 _currentPositionMs.value = 0L
                                 stopExoProgressTicker()
@@ -156,14 +182,17 @@ class AudioPlayerManager(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                // Если ExoPlayer не смог проиграть поток, бесшовно переключаемся на WebView fallback с сохранением позиции
+                // Если ExoPlayer выдал ошибку на локальном файле — очищаем поврежденный файл и играем онлайн
                 if (activeEngine == PlaybackEngine.EXOPLAYER) {
-                    val savedPositionMs = _currentPositionMs.value
-                    activeEngine = PlaybackEngine.WEBVIEW
-                    player.stop()
-                    player.clearMediaItems()
-                    _currentTrack.value?.let { tr ->
-                        webViewEngine.playTrack(tr.id, startPositionMs = savedPositionMs)
+                    val currentTrackValue = _currentTrack.value
+                    if (isPlayingLocalFile && currentTrackValue != null) {
+                        handleCorruptLocalFileAndFallback(currentTrackValue)
+                    } else if (currentTrackValue != null) {
+                        val savedPositionMs = _currentPositionMs.value
+                        activeEngine = PlaybackEngine.WEBVIEW
+                        player.stop()
+                        player.clearMediaItems()
+                        webViewEngine.playTrack(currentTrackValue.id, startPositionMs = savedPositionMs)
                     }
                 }
             }
@@ -315,6 +344,8 @@ class AudioPlayerManager(
         }
 
         if (localFile != null) {
+            isPlayingLocalFile = true
+            currentLocalFilePath = localFile.absolutePath
             activeEngine = PlaybackEngine.EXOPLAYER
             startPlaybackService()
 
@@ -326,6 +357,12 @@ class AudioPlayerManager(
         }
 
         // 2. Онлайн воспроизведение через прямой поток (ExoPlayer) с фоновым сервисом
+        playTrackOnline(track)
+    }
+
+    private fun playTrackOnline(track: Track) {
+        isPlayingLocalFile = false
+        currentLocalFilePath = null
         val streamQuality = appSettings?.getStreamQuality() ?: "standard"
         streamResolveJob = scope.launch(Dispatchers.IO) {
             val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(
@@ -356,6 +393,44 @@ class AudioPlayerManager(
                 }
             }
         }
+    }
+
+    private fun handleCorruptLocalFileAndFallback(track: Track) {
+        isPlayingLocalFile = false
+        val pathToDelete = currentLocalFilePath ?: track.localFilePath
+        currentLocalFilePath = null
+
+        scope.launch(Dispatchers.IO) {
+            // Удаляем поврежденный файл с диска
+            if (!pathToDelete.isNullOrBlank()) {
+                try {
+                    val file = File(pathToDelete)
+                    if (file.exists()) file.delete()
+                } catch (ignored: Exception) {}
+            }
+
+            // Удаляем возможные другие поврежденные кандидаты этого трека (< 100 КБ)
+            try {
+                val musicDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "BlackFox")
+                File(musicDirectory, "${track.id}.m4a").takeIf { it.exists() && it.length() < 100_000L }?.delete()
+                File(musicDirectory, "${track.id}.mp3").takeIf { it.exists() && it.length() < 100_000L }?.delete()
+                File(musicDirectory, "${track.id}.opus").takeIf { it.exists() && it.length() < 100_000L }?.delete()
+                File(musicDirectory, "${track.id}.webm").takeIf { it.exists() && it.length() < 100_000L }?.delete()
+            } catch (ignored: Exception) {}
+
+            // Сбрасываем статус скачивания в базе Room
+            try {
+                musicDao?.updateDownloadStatus(
+                    trackId = track.id,
+                    isDownloaded = false,
+                    filePath = null,
+                    downloadedAt = null
+                )
+            } catch (ignored: Exception) {}
+        }
+
+        // Запускаем воспроизведение трека онлайн, чтобы он заиграл и не скипнулся
+        playTrackOnline(track)
     }
 
     private fun preResolveNextTrack() {
@@ -391,24 +466,11 @@ class AudioPlayerManager(
             .setArtworkUri(if (track.thumbnailUrl.isNotBlank()) Uri.parse(track.thumbnailUrl) else null)
             .build()
 
-        val uriStr = uri.toString().lowercase()
-        val mimeType = when {
-            uriStr.contains(".m4a") || uriStr.contains("audio%2fmp4") || uriStr.contains("audio/mp4") -> MimeTypes.AUDIO_MP4
-            uriStr.contains(".webm") || uriStr.contains(".opus") || uriStr.contains("audio%2fwebm") || uriStr.contains("audio/webm") -> MimeTypes.AUDIO_WEBM
-            uriStr.contains(".mp3") || uriStr.contains("audio%2fmpeg") || uriStr.contains("audio/mpeg") -> MimeTypes.AUDIO_MPEG
-            else -> null
-        }
-
-        val builder = MediaItem.Builder()
+        return MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(uri)
             .setMediaMetadata(metadata)
-
-        if (mimeType != null) {
-            builder.setMimeType(mimeType)
-        }
-
-        return builder.build()
+            .build()
     }
 
     fun togglePlayPause() {
