@@ -568,6 +568,11 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onDownloadTrack = { downloadManager.downloadTrack(it) },
+                                    onDownloadAll = {
+                                        activeTracks.forEach { entity ->
+                                            downloadManager.downloadTrack(entity.toDomain())
+                                        }
+                                    },
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying
                                 )
@@ -645,6 +650,11 @@ class MainActivity : ComponentActivity() {
                                 onToggleFavorite = { track -> toggleFavorite(track) },
                                 onAddToPlaylistClick = { track -> trackForPlaylistSheet = track },
                                 onDownloadTrack = { downloadManager.downloadTrack(it) },
+                                onDownloadAll = {
+                                    favoriteTracks.forEach { entity ->
+                                        downloadManager.downloadTrack(entity.toDomain())
+                                    }
+                                },
                                 onReorderFavorites = { orderedIds -> reorderFavorites(orderedIds) },
                                 currentTrack = currentTrack,
                                 isPlaying = isPlaying

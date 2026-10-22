@@ -1,6 +1,7 @@
 package com.blackfox.music.presentation.screens.mymusic
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -23,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +53,7 @@ fun PlaylistDetailScreen(
     onToggleFavorite: (Track) -> Unit,
     onRemoveTrack: (String) -> Unit,
     onDownloadTrack: (Track) -> Unit = {},
+    onDownloadAll: () -> Unit = {},
     onUpdateCover: (Uri?) -> Unit,
     onRenamePlaylist: (String) -> Unit,
     onDeletePlaylist: () -> Unit,
@@ -60,10 +63,15 @@ fun PlaylistDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val accent = LocalAccentTheme.current.primary
+    val context = LocalContext.current
     val pl = playlist
     var localTracks by remember { mutableStateOf(tracks) }
     var draggingTrackId by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    val allDownloaded = remember(tracks) {
+        tracks.isNotEmpty() && tracks.all { it.isDownloaded && !it.localFilePath.isNullOrBlank() }
+    }
 
     LaunchedEffect(tracks) {
         if (draggingTrackId == null) {
@@ -160,6 +168,27 @@ fun PlaylistDetailScreen(
                                         }
                                     )
                                 }
+
+                                DropdownMenuItem(
+                                    text = { Text("Скачать все треки", color = TextPrimary, fontSize = 13.sp) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (allDownloaded) Icons.Default.DownloadDone else Icons.Default.Download,
+                                            contentDescription = null,
+                                            tint = accent,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        isMenuExpanded = false
+                                        if (allDownloaded) {
+                                            Toast.makeText(context, "Все треки плейлиста уже скачаны", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "Загрузка треков плейлиста начата...", Toast.LENGTH_SHORT).show()
+                                            onDownloadAll()
+                                        }
+                                    }
+                                )
 
                                 DropdownMenuItem(
                                     text = { Text("Переименовать", color = TextPrimary, fontSize = 13.sp) },
@@ -297,6 +326,29 @@ fun PlaylistDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Микс", color = TextPrimary, fontWeight = FontWeight.Medium)
+                            }
+
+                            // Кнопка Скачать все треки
+                            IconButton(
+                                onClick = {
+                                    if (allDownloaded) {
+                                        Toast.makeText(context, "Все треки плейлиста уже скачаны", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Загрузка треков плейлиста начата...", Toast.LENGTH_SHORT).show()
+                                        onDownloadAll()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0x18FFFFFF))
+                            ) {
+                                Icon(
+                                    imageVector = if (allDownloaded) Icons.Default.DownloadDone else Icons.Default.Download,
+                                    contentDescription = "Скачать все треки",
+                                    tint = if (allDownloaded) accent else TextPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }

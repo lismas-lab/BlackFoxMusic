@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
@@ -22,10 +24,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import android.widget.Toast
 import com.blackfox.music.data.download.DownloadProgress
 import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.local.TrackEntity
@@ -44,15 +48,21 @@ fun FavoritesDetailScreen(
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
     onDownloadTrack: (Track) -> Unit = {},
+    onDownloadAll: () -> Unit = {},
     onReorderFavorites: (List<String>) -> Unit = {},
     currentTrack: Track? = null,
     isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val accent = LocalAccentTheme.current.primary
+    val context = LocalContext.current
     var localTracks by remember { mutableStateOf(favoriteTracks) }
     var draggingTrackId by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    val allDownloaded = remember(favoriteTracks) {
+        favoriteTracks.isNotEmpty() && favoriteTracks.all { it.isDownloaded && !it.localFilePath.isNullOrBlank() }
+    }
 
     LaunchedEffect(favoriteTracks) {
         if (draggingTrackId == null) {
@@ -181,6 +191,29 @@ fun FavoritesDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Микс", color = TextPrimary, fontWeight = FontWeight.Medium)
+                            }
+
+                            // Кнопка Скачать все треки
+                            IconButton(
+                                onClick = {
+                                    if (allDownloaded) {
+                                        Toast.makeText(context, "Все любимые треки уже скачаны", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Загрузка любимых треков начата...", Toast.LENGTH_SHORT).show()
+                                        onDownloadAll()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0x18FFFFFF))
+                            ) {
+                                Icon(
+                                    imageVector = if (allDownloaded) Icons.Default.DownloadDone else Icons.Default.Download,
+                                    contentDescription = "Скачать все треки",
+                                    tint = if (allDownloaded) accent else TextPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
 
                         }

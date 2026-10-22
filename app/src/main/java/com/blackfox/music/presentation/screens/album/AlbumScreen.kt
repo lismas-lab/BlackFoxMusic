@@ -1,5 +1,7 @@
 package com.blackfox.music.presentation.screens.album
 
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -48,6 +50,7 @@ fun AlbumScreen(
     val favorites by viewModel.favoriteTrackIds.collectAsState()
     val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
     val accentColor = LocalAccentTheme.current.primary
+    val context = LocalContext.current
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
 
     Box(
@@ -181,7 +184,10 @@ fun AlbumScreen(
 
                             // Кнопка Скачать альбом целиком
                             IconButton(
-                                onClick = { viewModel.downloadEntireAlbum() },
+                                onClick = {
+                                    Toast.makeText(context, "Загрузка альбома начата...", Toast.LENGTH_SHORT).show()
+                                    viewModel.downloadEntireAlbum()
+                                },
                                 modifier = Modifier
                                     .size(46.dp)
                                     .clip(RoundedCornerShape(16.dp))

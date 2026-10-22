@@ -16,6 +16,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PlayArrow
@@ -73,6 +76,7 @@ fun ArtistScreen(
     val totalSongsCount by viewModel.totalSongsCountString.collectAsState()
     val isFollowed by viewModel.isFollowed.collectAsState()
     val accentColor = LocalAccentTheme.current.primary
+    val context = LocalContext.current
 
     var selectedTab by remember { mutableStateOf(ArtistTab.OVERVIEW) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
@@ -269,6 +273,25 @@ fun ArtistScreen(
                                                     text = "Слушать всё",
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 14.sp
+                                                )
+                                            }
+
+                                            // Кнопка Скачать все треки
+                                            IconButton(
+                                                onClick = {
+                                                    Toast.makeText(context, "Загрузка треков артиста начата...", Toast.LENGTH_SHORT).show()
+                                                    primaryPlayList.forEach { viewModel.downloadTrack(it) }
+                                                },
+                                                modifier = Modifier
+                                                    .size(42.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0x18FFFFFF))
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Download,
+                                                    contentDescription = "Скачать все треки",
+                                                    tint = accentColor,
+                                                    modifier = Modifier.size(20.dp)
                                                 )
                                             }
                                         }
