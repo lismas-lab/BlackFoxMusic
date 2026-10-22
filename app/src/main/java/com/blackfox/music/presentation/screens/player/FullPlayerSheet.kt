@@ -11,6 +11,8 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +22,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
+import kotlin.math.absoluteValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -54,6 +58,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun FullPlayerSheet(
     track: Track,
+    queue: List<Track> = emptyList(),
     isPlaying: Boolean,
     currentPositionMs: Long,
     totalDurationMs: Long,
@@ -71,6 +76,7 @@ fun FullPlayerSheet(
     onArtistClick: (artistName: String, artistId: String?) -> Unit = { _, _ -> },
     onAlbumClick: (albumTitle: String, albumId: String?) -> Unit = { _, _ -> },
     onSwitchToTrack: (Track) -> Unit = {},
+    onTrackSelect: (Track) -> Unit = {},
     repository: InnerTubeRepository = remember { InnerTubeRepository() },
     modifier: Modifier = Modifier
 ) {
@@ -87,6 +93,41 @@ fun FullPlayerSheet(
     var manualSearchError by remember { mutableStateOf<String?>(null) }
     var isManualSearching by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    // Очередь для карусели обложек: гарантируем наличие текущего трека
+    val effectiveQueue = remember(queue, track) {
+        if (queue.isNotEmpty() && queue.any { it.id == track.id }) {
+            queue
+        } else {
+            listOf(track)
+        }
+    }
+    val currentTrackIndex = remember(effectiveQueue, track.id) {
+        val idx = effectiveQueue.indexOfFirst { it.id == track.id }
+        if (idx != -1) idx else 0
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = currentTrackIndex,
+        pageCount = { effectiveQueue.size }
+    )
+
+    // При смене трека извне (кнопки Next/Previous или автопереход) плавно скроллим карусель
+    LaunchedEffect(currentTrackIndex) {
+        if (pagerState.currentPage != currentTrackIndex && currentTrackIndex in 0 until effectiveQueue.size) {
+            pagerState.animateScrollToPage(currentTrackIndex)
+        }
+    }
+
+    // При свайпе карусели пользователем переключаем трек в очереди
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }.collect { page ->
+            val targetTrack = effectiveQueue.getOrNull(page)
+            if (targetTrack != null && targetTrack.id != track.id) {
+                onTrackSelect(targetTrack)
+            }
+        }
+    }
 
     var isUncensoredSheetVisible by remember { mutableStateOf(false) }
     var uncensoredVideos by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -215,12 +256,14 @@ fun FullPlayerSheet(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Верхняя панель (Свернуть плеер, заголовок, В плейлист)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -253,28 +296,56 @@ fun FullPlayerSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Центральная область: Обложка альбома
-            Box(
+            // Центральная карусель обложек: текущий трек по центру, слева и справа выглядывают части предыдущего и следующего трека
+            HorizontalPager(
+                state = pagerState,
+                contentPadding = PaddingValues(horizontal = 42.dp),
+                pageSpacing = 16.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f)
-            ) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = track.title,
-                    contentScale = ContentScale.Crop,
+                    .aspectRatio(1.05f)
+            ) { page ->
+                val itemTrack = effectiveQueue.getOrNull(page)
+                val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
+                val scale = lerp(0.84f, 1f, 1f - pageOffset)
+                val itemAlpha = lerp(0.45f, 1f, 1f - pageOffset)
+
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            alpha = itemAlpha
+                        }
                         .clip(RoundedCornerShape(32.dp))
-                        .liquidGlass(cornerRadius = 32.dp)
-                )
+                        .clickable {
+                            if (page != pagerState.currentPage) {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(page)
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = itemTrack?.thumbnailUrl ?: track.thumbnailUrl,
+                        contentDescription = itemTrack?.title ?: track.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .liquidGlass(cornerRadius = 32.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
             // Название трека и кликабельный артист
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -420,12 +491,16 @@ fun FullPlayerSheet(
                     activeTrackColor = accentColor,
                     inactiveTrackColor = Color.White.copy(alpha = 0.15f)
                 ),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
             )
 
             // Тайминги (Прошло / Осталось)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
@@ -444,7 +519,9 @@ fun FullPlayerSheet(
 
             // Кнопки управления воспроизведением
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -564,6 +641,7 @@ fun FullPlayerSheet(
             // Индикатор свайпа снизу вверх для открытия текста песни
             Row(
                 modifier = Modifier
+                    .padding(horizontal = 24.dp)
                     .padding(bottom = 6.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color.White.copy(alpha = 0.08f))
@@ -1119,3 +1197,6 @@ fun FullPlayerSheet(
         }
     }
 }
+
+private fun lerp(start: Float, stop: Float, fraction: Float): Float =
+    start + fraction * (stop - start)

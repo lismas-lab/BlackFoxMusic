@@ -152,6 +152,7 @@ class MainActivity : ComponentActivity() {
 
                 // Состояние аудиоплеера
                 val currentTrack by playerManager.currentTrack.collectAsState()
+                val currentQueue by playerManager.currentQueue.collectAsState()
                 val isPlaying by playerManager.isPlaying.collectAsState()
                 val currentPositionMs by playerManager.currentPositionMs.collectAsState()
                 val totalDurationMs by playerManager.totalDurationMs.collectAsState()
@@ -918,6 +919,7 @@ class MainActivity : ComponentActivity() {
 
                             FullPlayerSheet(
                                 track = track,
+                                queue = currentQueue,
                                 isPlaying = isPlaying,
                                 currentPositionMs = currentPositionMs,
                                 totalDurationMs = totalDurationMs,
@@ -940,6 +942,14 @@ class MainActivity : ComponentActivity() {
                                         playerManager.setQueueAndPlay(updatedQueue, idx)
                                     } else {
                                         playerManager.setQueueAndPlay(listOf(uncensoredTrack) + queue, 0)
+                                    }
+                                },
+                                onTrackSelect = { selectedTrack ->
+                                    val idx = currentQueue.indexOfFirst { it.id == selectedTrack.id }
+                                    if (idx != -1) {
+                                        playerManager.setQueueAndPlay(currentQueue, idx)
+                                    } else {
+                                        playerManager.playTrack(selectedTrack)
                                     }
                                 },
                                 onCloseClick = { isFullPlayerVisible = false },

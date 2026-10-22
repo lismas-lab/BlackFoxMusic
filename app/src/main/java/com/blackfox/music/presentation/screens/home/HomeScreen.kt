@@ -72,10 +72,6 @@ fun HomeScreen(
 
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
 
-    val quickGenres = remember {
-        listOf("Рок", "Электроника", "Phonk", "Хип-хоп", "Lo-Fi", "Synthwave", "Поп", "Метал")
-    }
-
     // Преобразуем любимые треки в доменные модели для мгновенного воспроизведения из очереди
     val favoriteDomainTracks = remember(favoriteTracks, downloadedTrackIds) {
         favoriteTracks.map { entity ->
@@ -620,41 +616,6 @@ fun HomeScreen(
                                                 }
                                             }
                                         }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Быстрый выбор настроения / жанра
-                    item {
-                        Column {
-                            Text(
-                                text = "Жанры и настроения",
-                                color = TextPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
-
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                contentPadding = PaddingValues(vertical = 4.dp)
-                            ) {
-                                items(quickGenres) { genre ->
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .liquidGlass(cornerRadius = 12.dp, backgroundColor = Color(0x10FFFFFF))
-                                            .clickable { viewModel.onQueryChange(genre) }
-                                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = genre,
-                                            color = TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
                                     }
                                 }
                             }

@@ -321,6 +321,15 @@ class AudioPlayerManager(
         _currentTrack.value = track
         _currentPositionMs.value = 0L
 
+        val q = _currentQueue.value
+        val foundIdx = q.indexOfFirst { it.id == track.id }
+        if (foundIdx != -1) {
+            currentQueueIndex = foundIdx
+        } else if (q.isEmpty()) {
+            _currentQueue.value = listOf(track)
+            currentQueueIndex = 0
+        }
+
         val initialDurationMs = parseDurationStringToMs(track.duration)
         if (initialDurationMs > 0) {
             _totalDurationMs.value = initialDurationMs
