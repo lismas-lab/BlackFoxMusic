@@ -95,14 +95,9 @@ object AudioStreamResolver {
             e.printStackTrace()
         }
 
-        // Для стриминга: если NewPipe не дал ссылку, сразу возвращаем null,
-        // чтобы мгновенно включить WebView IFrame движок без зависаний.
-        if (!forDownload) {
-            return@withContext null
-        }
-
-        // 2. Резервный Fallback для скачивания: если NewPipe не смог отдать прямой поток
-        // (например, при временных ограничениях CDN), обращаемся к стороннему Loader API
+        // 2. Резервный Fallback: если NewPipe не смог отдать прямой поток
+        // (например, при временных ограничениях CDN, смене шифра плеера или блокировках), обращаемся к надежному Loader API.
+        // Это гарантирует работу как оффлайн-загрузки, так и потокового онлайн-воспроизведения без зависаний!
         try {
             val fallbackUrl = resolveFromLoaderApi(videoId, quality, onProgress)
             if (!fallbackUrl.isNullOrBlank()) {
@@ -125,48 +120,44 @@ object AudioStreamResolver {
     ): org.schabi.newpipe.extractor.stream.AudioStream? {
         if (audioStreams.isEmpty()) return null
 
+        // В NewPipeExtractor s.bitrate возвращается в битах в секунду (bps, например 130677 bps = ~130 kbps)
+        fun toKbps(s: org.schabi.newpipe.extractor.stream.AudioStream): Int {
+            return if (s.bitrate > 1000) s.bitrate / 1000 else s.bitrate
+        }
+
+        // Потоки M4A (AAC) имеют наивысшую совместимость и аппаратное ускорение на всех Android устройствах
+        val m4aStreams = audioStreams.filter {
+            it.format?.suffix?.equals("m4a", ignoreCase = true) == true ||
+                    it.codec?.contains("mp4a", ignoreCase = true) == true
+        }
+
         return when (quality) {
             "low" -> {
-                // Экономия / быстрый старт на медленной сети: выбираем поток с битрейтом <= 128 kbps (48..128 kbps)
-                val lowStreams = audioStreams.filter { it.bitrate in 40..128 }
+                // Экономия трафика / слабый интернет: ищем поток с битрейтом <= 90 kbps (например Opus 50-70k или AAC 48k)
+                val lowStreams = audioStreams.filter { toKbps(it) in 30..90 }
                 lowStreams.minByOrNull { it.bitrate }
                     ?: audioStreams.minByOrNull { it.bitrate }
             }
             "192", "standard" -> {
-                // Стандартное качество (128 - 192 kbps):
-                // Ищем аудиопоток в диапазоне 110-192 kbps
-                val midStreams = audioStreams.filter { it.bitrate in 110..192 }
-                if (forDownload) {
-                    // Для загрузки 192 kbps отдаем приоритет нативному M4A (AAC 128 kbps, размер ~3.3 МБ)
-                    val m4aMid = midStreams.filter {
-                        it.format?.suffix?.equals("m4a", ignoreCase = true) == true ||
-                                it.codec?.contains("mp4a", ignoreCase = true) == true
-                    }.maxByOrNull { it.bitrate }
-
-                    m4aMid
-                        ?: midStreams.maxByOrNull { it.bitrate }
-                        ?: audioStreams.filter { it.bitrate <= 192 }.maxByOrNull { it.bitrate }
-                        ?: audioStreams.minByOrNull { it.bitrate }
-                } else {
-                    midStreams.maxByOrNull { it.bitrate }
-                        ?: audioStreams.filter { it.bitrate <= 192 }.maxByOrNull { it.bitrate }
-                        ?: audioStreams.minByOrNull { it.bitrate }
-                }
+                // Стандартное качество: для мобильного стриминга и 192k загрузки лучший выбор — нативный M4A AAC (~128-130 kbps)
+                // Он стартует моментально и не требует ожидания долгой буферизации
+                val m4aStandard = m4aStreams.maxByOrNull { it.bitrate }
+                m4aStandard
+                    ?: audioStreams.filter { toKbps(it) in 100..192 }.maxByOrNull { it.bitrate }
+                    ?: audioStreams.maxByOrNull { it.bitrate }
             }
             "256" -> {
-                // Высокое качество (256 kbps):
-                // Если доступен поток >= 200 kbps (например itag 141 AAC 256k / itag 172 Vorbis 256k), берем его.
-                // Иначе - наивысший доступный битрейт
-                val highStreams = audioStreams.filter { it.bitrate >= 200 }
+                // Высокое качество (256 kbps): ищем поток >= 200 kbps, иначе максимальный доступный
+                val highStreams = audioStreams.filter { toKbps(it) >= 200 }
                 highStreams.maxByOrNull { it.bitrate }
                     ?: audioStreams.maxByOrNull { it.bitrate }
             }
             "320", "high" -> {
-                // Максимальное качество: абсолютный максимум битрейта (Opus 160k или AAC 256k)
+                // Максимальное качество: наивысший битрейт (Opus 160k или AAC 256k)
                 audioStreams.maxByOrNull { it.bitrate }
             }
             else -> {
-                audioStreams.maxByOrNull { it.bitrate }
+                m4aStreams.maxByOrNull { it.bitrate } ?: audioStreams.maxByOrNull { it.bitrate }
             }
         }
     }

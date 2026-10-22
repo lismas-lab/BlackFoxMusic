@@ -14,15 +14,12 @@ import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
-import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -42,25 +39,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-@OptIn(UnstableApi::class)
-object MediaCacheManager {
-    @Volatile
-    private var simpleCache: SimpleCache? = null
-
-    fun getCache(context: Context): SimpleCache {
-        return simpleCache ?: synchronized(this) {
-            simpleCache ?: run {
-                val cacheDir = File(context.cacheDir, "exoplayer_media_cache")
-                val evictor = LeastRecentlyUsedCacheEvictor(250 * 1024 * 1024L) // 250 МБ кэш на диске
-                val databaseProvider = StandaloneDatabaseProvider(context)
-                SimpleCache(cacheDir, evictor, databaseProvider).also {
-                    simpleCache = it
-                }
-            }
-        }
-    }
-}
-
 class AudioPlayerManager(
     private val context: Context,
     private val appSettings: AppSettings? = null,
@@ -73,33 +51,25 @@ class AudioPlayerManager(
 
     internal var activeEngine = PlaybackEngine.NONE
 
-    // 1. Центральный движок ExoPlayer с аудиофокусом, дисковым кэшированием (250 МБ), быстрым буфером и Wakelock
+    // 1. Центральный движок ExoPlayer с аудиофокусом, устойчивыми таймаутами для VPN и Wakelock
     @OptIn(UnstableApi::class)
     private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
         .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-        .setConnectTimeoutMs(8000)
-        .setReadTimeoutMs(15000)
+        .setConnectTimeoutMs(20_000)
+        .setReadTimeoutMs(25_000)
         .setAllowCrossProtocolRedirects(true)
-        .setKeepPostFor302Redirects(true)
-        .setDefaultRequestProperties(mapOf("Accept-Encoding" to "identity"))
-
-    @OptIn(UnstableApi::class)
-    private val cacheDataSourceFactory = CacheDataSource.Factory()
-        .setCache(MediaCacheManager.getCache(context))
-        .setUpstreamDataSourceFactory(httpDataSourceFactory)
-        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
     @OptIn(UnstableApi::class)
     private val mediaSourceFactory = DefaultMediaSourceFactory(context)
-        .setDataSourceFactory(DefaultDataSource.Factory(context, cacheDataSourceFactory))
+        .setDataSourceFactory(DefaultDataSource.Factory(context, httpDataSourceFactory))
 
     @OptIn(UnstableApi::class)
     private val fastLoadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            /* minBufferMs = */ 10_000,
+            /* minBufferMs = */ 15_000,
             /* maxBufferMs = */ 50_000,
-            /* bufferForPlaybackMs = */ 500, // Мгновенный старт: всего 500 мс буфера вместо дефолтных 2500 мс!
-            /* bufferForPlaybackAfterRebufferMs = */ 1_000
+            /* bufferForPlaybackMs = */ 1_000, // 1 секунда буфера для моментального и стабильного старта
+            /* bufferForPlaybackAfterRebufferMs = */ 2_000
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .setBackBuffer(20_000, true) // Сохраняем 20 сек обратного буфера для плавной перемотки назад
@@ -430,11 +400,24 @@ class AudioPlayerManager(
             .setArtworkUri(if (track.thumbnailUrl.isNotBlank()) Uri.parse(track.thumbnailUrl) else null)
             .build()
 
-        return MediaItem.Builder()
+        val uriStr = uri.toString().lowercase()
+        val mimeType = when {
+            uriStr.contains(".m4a") || uriStr.contains("audio%2fmp4") || uriStr.contains("audio/mp4") -> MimeTypes.AUDIO_MP4
+            uriStr.contains(".webm") || uriStr.contains(".opus") || uriStr.contains("audio%2fwebm") || uriStr.contains("audio/webm") -> MimeTypes.AUDIO_WEBM
+            uriStr.contains(".mp3") || uriStr.contains("audio%2fmpeg") || uriStr.contains("audio/mpeg") -> MimeTypes.AUDIO_MPEG
+            else -> null
+        }
+
+        val builder = MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(uri)
             .setMediaMetadata(metadata)
-            .build()
+
+        if (mimeType != null) {
+            builder.setMimeType(mimeType)
+        }
+
+        return builder.build()
     }
 
     private fun loadArtwork(track: Track) {
