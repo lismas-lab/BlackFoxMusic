@@ -37,37 +37,36 @@ object AudioStreamResolver {
         forDownload: Boolean = false,
         onProgress: ((Int) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
-        // 1. Для скачивания приоритетен Loader API (чистый файл MP3)
-        if (forDownload) {
-            try {
-                val mp3Url = resolveFromLoaderApi(videoId, onProgress)
-                if (!mp3Url.isNullOrBlank()) {
-                    return@withContext mp3Url
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // 2. Для онлайн стриминга первоочередно извлекаем нативный аудиопоток через NewPipeExtractor
-        // Нативный поток m4a/webm поддерживает HTTP Range запросы и мгновенную перемотку (seek)
+        // 1. Первоочередно извлекаем нативный аудиопоток напрямую из Google CDN через NewPipeExtractor
+        // Нативный поток m4a (AAC 128 kbps) или webm (Opus 160 kbps) стартует мгновенно (< 0.5 сек),
+        // весит в 3 раза меньше MP3 (~3-4 МБ вместо 11 МБ), обеспечивает наивысшую скорость Google CDN
+        // и не тратит 20-30 секунд на сторонний сервер-конвертер (особенно критично при работе через VPN).
         try {
             init()
+            onProgress?.invoke(10)
             val watchUrl = "https://www.youtube.com/watch?v=$videoId"
             val extractor = ServiceList.YouTube.getStreamExtractor(watchUrl) as YoutubeStreamExtractor
             extractor.fetchPage()
 
             val audioStreams = extractor.audioStreams
             if (!audioStreams.isNullOrEmpty()) {
-                val bestAudio = audioStreams.maxByOrNull { it.bitrate }
+                // Для загрузки отдаем приоритет нативному M4A (AAC) как самому быстрому и аппаратно аппаратному на Android
+                val m4aStream = audioStreams.filter {
+                    it.format?.suffix?.equals("m4a", ignoreCase = true) == true ||
+                            it.codec?.contains("mp4a", ignoreCase = true) == true
+                }.maxByOrNull { it.bitrate }
+
+                val bestAudio = m4aStream ?: audioStreams.maxByOrNull { it.bitrate }
                 val url = bestAudio?.content ?: bestAudio?.url
                 if (!url.isNullOrBlank()) {
+                    onProgress?.invoke(25)
                     return@withContext url
                 }
             }
 
             val hls = extractor.hlsUrl
             if (!hls.isNullOrBlank()) {
+                onProgress?.invoke(25)
                 return@withContext hls
             }
         } catch (e: Exception) {
@@ -75,13 +74,13 @@ object AudioStreamResolver {
         }
 
         // Для стриминга: если NewPipe не дал ссылку, сразу возвращаем null,
-        // чтобы не ждать 20 сек Loader API (который к тому же не поддерживает Range seek),
-        // а мгновенно запустить воспроизведение через проверенный HTML5 IFrame WebView движок!
+        // чтобы мгновенно включить WebView IFrame движок без зависаний.
         if (!forDownload) {
             return@withContext null
         }
 
-        // 3. Fallback для скачивания, если Loader API не сработал на первой попытке
+        // 2. Резервный Fallback для скачивания: если NewPipe не смог отдать прямой поток
+        // (например, при временных ограничениях CDN), обращаемся к стороннему Loader API
         try {
             val mp3Url = resolveFromLoaderApi(videoId, onProgress)
             if (!mp3Url.isNullOrBlank()) {

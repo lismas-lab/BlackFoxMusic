@@ -290,13 +290,17 @@ class AudioPlayerManager(
 
         // 1. Проверяем наличие полностью скачанного файла на устройстве
         val musicDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "BlackFox")
-        val candidateMp3 = File(musicDirectory, "${track.id}.mp3")
         val candidateM4a = File(musicDirectory, "${track.id}.m4a")
+        val candidateMp3 = File(musicDirectory, "${track.id}.mp3")
+        val candidateOpus = File(musicDirectory, "${track.id}.opus")
+        val candidateWebm = File(musicDirectory, "${track.id}.webm")
 
         val localFile = when {
             !track.localFilePath.isNullOrBlank() && File(track.localFilePath).exists() && File(track.localFilePath).length() > 50_000L -> File(track.localFilePath)
-            candidateMp3.exists() && candidateMp3.length() > 50_000L -> candidateMp3
             candidateM4a.exists() && candidateM4a.length() > 50_000L -> candidateM4a
+            candidateMp3.exists() && candidateMp3.length() > 50_000L -> candidateMp3
+            candidateOpus.exists() && candidateOpus.length() > 50_000L -> candidateOpus
+            candidateWebm.exists() && candidateWebm.length() > 50_000L -> candidateWebm
             else -> null
         }
 

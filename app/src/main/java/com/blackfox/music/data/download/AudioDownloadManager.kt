@@ -20,7 +20,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class AudioDownloadManager(
     private val context: Context,
@@ -28,23 +30,31 @@ class AudioDownloadManager(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 ) {
 
+    companion object {
+        // Оптимальное количество параллельных потоков загрузки (3 воркера).
+        // Обеспечивает максимальную утилизацию VPN-туннеля и моментальную отдачу с Google CDN.
+        private const val CONCURRENT_DOWNLOAD_WORKERS = 3
+    }
+
     private val _downloadProgressMap = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val downloadProgressMap: StateFlow<Map<String, DownloadProgress>> = _downloadProgressMap.asStateFlow()
 
-    // Последовательная очередь закачек для исключения конфликтов потоков и таймаутов
+    // Очередь закачек
     private val downloadChannel = Channel<Track>(Channel.UNLIMITED)
     private val activeOrQueuedTrackIds = Collections.synchronizedSet(mutableSetOf<String>())
-    @Volatile private var currentDownloadingTrackId: String? = null
-    @Volatile private var currentDownloadingJob: Job? = null
+    private val activeDownloadingJobs = ConcurrentHashMap<String, Job>()
+    private val activeWorkersRunning = AtomicInteger(0)
 
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
     private val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackFox:AudioDownloadManager")
 
     private val httpClient = OkHttpClient.Builder()
+        .connectionPool(okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
         .build()
 
     val musicDirectory: File by lazy {
@@ -60,38 +70,44 @@ class AudioDownloadManager(
     }
 
     init {
-        // Фоновый рабочий воркер, последовательно берущий треки из очереди
-        scope.launch {
-            for (track in downloadChannel) {
-                // Если задача была отменена пока стояла в очереди
-                if (!activeOrQueuedTrackIds.contains(track.id)) {
-                    continue
-                }
-
-                try {
-                    if (wakeLock?.isHeld == false) {
-                        wakeLock.acquire(15 * 60 * 1000L)
+        // Пул параллельных воркеров для быстрой многопоточной загрузки через VPN
+        repeat(CONCURRENT_DOWNLOAD_WORKERS) {
+            scope.launch {
+                for (track in downloadChannel) {
+                    // Если задача была отменена пока стояла в очереди
+                    if (!activeOrQueuedTrackIds.contains(track.id)) {
+                        continue
                     }
-                } catch (e: Exception) {}
 
-                DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", 0)
-                currentDownloadingTrackId = track.id
-                val job = launch {
-                    processTrackDownload(track)
-                }
-                currentDownloadingJob = job
-                job.join()
-                currentDownloadingJob = null
-                currentDownloadingTrackId = null
-                activeOrQueuedTrackIds.remove(track.id)
-
-                if (activeOrQueuedTrackIds.isEmpty()) {
+                    activeWorkersRunning.incrementAndGet()
                     try {
-                        if (wakeLock?.isHeld == true) {
-                            wakeLock.release()
+                        if (wakeLock?.isHeld == false) {
+                            wakeLock.acquire(15 * 60 * 1000L)
                         }
                     } catch (e: Exception) {}
-                    DownloadService.stop(context)
+
+                    DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", 0)
+
+                    val job = launch {
+                        processTrackDownload(track)
+                    }
+                    activeDownloadingJobs[track.id] = job
+                    try {
+                        job.join()
+                    } finally {
+                        activeDownloadingJobs.remove(track.id)
+                        activeOrQueuedTrackIds.remove(track.id)
+                        val stillRunning = activeWorkersRunning.decrementAndGet()
+
+                        if (activeOrQueuedTrackIds.isEmpty() && stillRunning == 0) {
+                            try {
+                                if (wakeLock?.isHeld == true) {
+                                    wakeLock.release()
+                                }
+                            } catch (e: Exception) {}
+                            DownloadService.stop(context)
+                        }
+                    }
                 }
             }
         }
@@ -168,7 +184,11 @@ class AudioDownloadManager(
             }
 
             // 3. Скачиваем аудиофайл во временный файл
-            val ext = if (directStreamUrl.contains(".m4a") || directStreamUrl.contains("audio/mp4")) "m4a" else "mp3"
+            val ext = when {
+                directStreamUrl.contains(".m4a") || directStreamUrl.contains("audio/mp4") || directStreamUrl.contains("mime=audio%2Fmp4") -> "m4a"
+                directStreamUrl.contains(".opus") || directStreamUrl.contains("audio/webm") || directStreamUrl.contains("mime=audio%2Fwebm") -> "opus"
+                else -> "mp3"
+            }
             val finalFile = File(musicDirectory, "${track.id}.$ext")
 
             if (tempFile.exists()) tempFile.delete()
@@ -248,10 +268,9 @@ class AudioDownloadManager(
     }
 
     suspend fun deleteDownloadedTrack(trackId: String) = withContext(Dispatchers.IO) {
+        activeDownloadingJobs[trackId]?.cancel()
+        activeDownloadingJobs.remove(trackId)
         activeOrQueuedTrackIds.remove(trackId)
-        if (currentDownloadingTrackId == trackId) {
-            currentDownloadingJob?.cancel()
-        }
 
         val tmp = File(musicDirectory, "$trackId.tmp")
         if (tmp.exists()) tmp.delete()
@@ -261,6 +280,12 @@ class AudioDownloadManager(
 
         val m4a = File(musicDirectory, "$trackId.m4a")
         if (m4a.exists()) m4a.delete()
+
+        val opus = File(musicDirectory, "$trackId.opus")
+        if (opus.exists()) opus.delete()
+
+        val webm = File(musicDirectory, "$trackId.webm")
+        if (webm.exists()) webm.delete()
 
         val coverFile = File(coversDirectory, "${trackId}_cover.jpg")
         if (coverFile.exists()) coverFile.delete()
@@ -286,8 +311,8 @@ class AudioDownloadManager(
     }
 
     suspend fun clearAllDownloaded() = withContext(Dispatchers.IO) {
-        currentDownloadingJob?.cancel()
-        currentDownloadingJob = null
+        activeDownloadingJobs.values.forEach { it.cancel() }
+        activeDownloadingJobs.clear()
         activeOrQueuedTrackIds.clear()
 
         musicDirectory.listFiles()?.forEach { it.delete() }
@@ -318,7 +343,7 @@ class AudioDownloadManager(
 
         body.byteStream().use { input ->
             FileOutputStream(destination).use { output ->
-                val buffer = ByteArray(16 * 1024)
+                val buffer = ByteArray(64 * 1024)
                 var bytesRead: Int
                 var lastPercent = 25
 
