@@ -1,14 +1,18 @@
 package com.blackfox.music.presentation.screens.player
 
+import android.os.Build
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
@@ -18,10 +22,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,11 +44,10 @@ import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.theme.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
- * Полноэкранный плеер в стиле Liquid Glass с текстами песен и переходом к артисту
+ * Полноэкранный плеер в стиле Liquid Glass с выдвижной шторкой текста песни (свайп снизу вверх),
+ * размытым атмосферным фоном в тон обложки и центрированной типографикой.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +74,9 @@ fun FullPlayerSheet(
     modifier: Modifier = Modifier
 ) {
     val accentColor = LocalAccentTheme.current.primary
-    var isLyricsMode by remember { mutableStateOf(false) }
+
+    // Состояние выдвижной шторки с текстом песни
+    var isLyricsSheetVisible by remember { mutableStateOf(false) }
     var lyricsPair by remember { mutableStateOf<Pair<String, String>?>(null) }
     var isLyricsLoading by remember { mutableStateOf(false) }
     var lyricsLoadedTrackId by remember { mutableStateOf<String?>(null) }
@@ -123,14 +133,15 @@ fun FullPlayerSheet(
         }
     }
 
-    LaunchedEffect(track.id, isLyricsMode) {
-        if (isLyricsMode && lyricsLoadedTrackId != track.id) {
+    // Упреждающая загрузка текста песни в фоне сразу при смене трека
+    LaunchedEffect(track.id) {
+        if (lyricsLoadedTrackId != track.id) {
             isLyricsLoading = true
             lyricsPair = null
             try {
                 lyricsPair = repository.getLyrics(track.id)
                 lyricsLoadedTrackId = track.id
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 lyricsPair = null
             } finally {
                 isLyricsLoading = false
@@ -178,15 +189,23 @@ fun FullPlayerSheet(
                 indication = null,
                 onClick = {}
             )
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    // Смах снизу вверх открывает текст песни
+                    if (dragAmount < -35) {
+                        isLyricsSheetVisible = true
+                    }
+                }
+            }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Верхняя панель (Свернуть плеер, переключатель ТРЕК / ТЕКСТ, В плейлист)
+            // Верхняя панель (Свернуть плеер, заголовок, В плейлист)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -201,46 +220,13 @@ fun FullPlayerSheet(
                     )
                 }
 
-                // Переключатель ТРЕК / ТЕКСТ
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0x18FFFFFF))
-                        .padding(3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (!isLyricsMode) accentColor else Color.Transparent)
-                            .clickable { isLyricsMode = false }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "ТРЕК",
-                            color = if (!isLyricsMode) ObsidianBlack else TextSecondary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (isLyricsMode) accentColor else Color.Transparent)
-                            .clickable { isLyricsMode = true }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "ТЕКСТ",
-                            color = if (isLyricsMode) ObsidianBlack else TextSecondary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                }
+                Text(
+                    text = "СЕЙЧАС ИГРАЕТ",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp
+                )
 
                 IconButton(onClick = onAddToPlaylistClick) {
                     Icon(
@@ -252,86 +238,26 @@ fun FullPlayerSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Центральная область: Обложка альбома или Текст песни
+            // Центральная область: Обложка альбома
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
             ) {
-                if (!isLyricsMode) {
-                    AsyncImage(
-                        model = track.thumbnailUrl,
-                        contentDescription = track.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(32.dp))
-                            .liquidGlass(cornerRadius = 32.dp)
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(32.dp))
-                            .liquidGlass(cornerRadius = 32.dp, backgroundColor = Color(0x221C1D22))
-                            .padding(20.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isLyricsLoading) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = accentColor, modifier = Modifier.size(36.dp))
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Загрузка текста песни...", color = TextSecondary, fontSize = 13.sp)
-                            }
-                        } else if (lyricsPair != null) {
-                            val (lyricsContent, lyricsSource) = lyricsPair!!
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState()),
-                                horizontalAlignment = Alignment.Start
-                            ) {
-                                Text(
-                                    text = lyricsContent,
-                                    color = TextPrimary,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    lineHeight = 28.sp
-                                )
-                                if (lyricsSource.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text(
-                                        text = lyricsSource,
-                                        color = TextMuted,
-                                        fontSize = 12.sp,
-                                        fontStyle = FontStyle.Italic
-                                    )
-                                }
-                            }
-                        } else {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.Lyrics,
-                                    contentDescription = null,
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Текст для этого трека пока не найден",
-                                    color = TextSecondary,
-                                    fontSize = 15.sp,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                }
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = track.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(32.dp))
+                        .liquidGlass(cornerRadius = 32.dp)
+                )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Название трека и кликабельный артист
             Row(
@@ -456,7 +382,7 @@ fun FullPlayerSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Полоса перемотки (Seek bar) с плавной прокруткой
             var isUserSeeking by remember { mutableStateOf(false) }
@@ -501,7 +427,7 @@ fun FullPlayerSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Кнопки управления воспроизведением
             Row(
@@ -609,14 +535,268 @@ fun FullPlayerSheet(
                     )
                 }
 
-                // Переключение Текста песни
-                IconButton(onClick = { isLyricsMode = !isLyricsMode }) {
+                // Кнопка вызова текста песни
+                IconButton(onClick = { isLyricsSheetVisible = true }) {
                     Icon(
                         imageVector = Icons.Default.Lyrics,
                         contentDescription = "Текст песни",
-                        tint = if (isLyricsMode) accentColor else TextSecondary,
+                        tint = if (lyricsPair != null) accentColor else TextSecondary,
                         modifier = Modifier.size(26.dp)
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Индикатор свайпа снизу вверх для открытия текста песни
+            Row(
+                modifier = Modifier
+                    .padding(bottom = 6.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .clickable { isLyricsSheetVisible = true }
+                    .padding(horizontal = 18.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Смахните вверх для текста песни",
+                    tint = accentColor,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Текст песни",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Выдвижная шторка с текстом песни (слайдится снизу вверх)
+        AnimatedVisibility(
+            visible = isLyricsSheetVisible,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(350)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(durationMillis = 300, easing = FastOutLinearInEasing)
+            ) + fadeOut(animationSpec = tween(300))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(ObsidianBlack)
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures { _, dragAmount ->
+                            // Смах вниз закрывает шторку
+                            if (dragAmount > 35) {
+                                isLyricsSheetVisible = false
+                            }
+                        }
+                    }
+            ) {
+                // 1. Размытый атмосферный фон из обложки трека
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = 0.4f }
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(80.dp)
+                            } else {
+                                Modifier
+                            }
+                        )
+                )
+
+                // 2. Глубокий затемняющий градиент поверх размытия для контрастности текста
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xE60A0B0E),
+                                    accentColor.copy(alpha = 0.22f),
+                                    Color(0xEE0A0B0E),
+                                    Color(0xFB0A0B0E)
+                                )
+                            )
+                        )
+                )
+
+                // 3. Центральное неоновое свечение в тон акцента трека
+                Box(
+                    modifier = Modifier
+                        .size(380.dp)
+                        .align(Alignment.Center)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    accentColor.copy(alpha = 0.25f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+
+                // 4. Основной контент шторки с текстом
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Хэндл и верхняя шапка закрытия
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 10.dp, bottom = 4.dp)
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.White.copy(alpha = 0.35f))
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { isLyricsSheetVisible = false }) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Закрыть текст",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = track.title,
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = track.artist,
+                                color = accentColor,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        // Пустая заглушка справа для идеальной центровки заголовка
+                        Box(modifier = Modifier.size(48.dp))
+                    }
+
+                    // Центральная область с текстом
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isLyricsLoading) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = accentColor, modifier = Modifier.size(42.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Загрузка текста песни...",
+                                    color = TextSecondary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        } else if (lyricsPair != null) {
+                            val (lyricsContent, lyricsSource) = lyricsPair!!
+                            val lines = remember(lyricsContent) { lyricsContent.lines() }
+
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                contentPadding = PaddingValues(top = 24.dp, bottom = 64.dp)
+                            ) {
+                                items(lines) { line ->
+                                    if (line.isBlank()) {
+                                        Spacer(modifier = Modifier.height(18.dp))
+                                    } else {
+                                        Text(
+                                            text = line,
+                                            color = Color.White.copy(alpha = 0.95f),
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.SansSerif,
+                                            textAlign = TextAlign.Center,
+                                            lineHeight = 34.sp,
+                                            letterSpacing = 0.3.sp,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp)
+                                        )
+                                    }
+                                }
+
+                                if (lyricsSource.isNotBlank()) {
+                                    item {
+                                        Spacer(modifier = Modifier.height(36.dp))
+                                        Text(
+                                            text = lyricsSource,
+                                            color = TextMuted,
+                                            fontSize = 12.sp,
+                                            fontStyle = FontStyle.Italic,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lyrics,
+                                    contentDescription = null,
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(56.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Текст для этого трека пока не найден",
+                                    color = TextSecondary,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
