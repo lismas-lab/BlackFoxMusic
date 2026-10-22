@@ -3,6 +3,7 @@ package com.blackfox.music.data.download
 import android.content.Context
 import android.os.Environment
 import android.os.PowerManager
+import com.blackfox.music.data.local.AppSettings
 import com.blackfox.music.data.local.MusicDao
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.network.AudioStreamResolver
@@ -27,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class AudioDownloadManager(
     private val context: Context,
     private val musicDao: MusicDao,
+    private val appSettings: AppSettings? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 ) {
 
@@ -143,15 +145,20 @@ class AudioDownloadManager(
 
     private suspend fun processTrackDownload(track: Track) {
         val tempFile = File(musicDirectory, "${track.id}.tmp")
+        val quality = appSettings?.getDownloadQuality() ?: "320"
         try {
             updateProgress(track.id, DownloadProgress(track.id, 5, 0, 0, DownloadStatus.DOWNLOADING))
 
-            // 1. Получаем прямую ссылку на аудиопоток (с повторной попыткой при необходимости)
+            // 1. Получаем прямую ссылку на аудиопоток с учетом выбранного качества (320, 256, 192)
             var directStreamUrl: String? = null
             var attempts = 0
             while (directStreamUrl.isNullOrBlank() && attempts < 3) {
                 attempts++
-                directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id, forDownload = true) { prepPercent ->
+                directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(
+                    videoId = track.id,
+                    forDownload = true,
+                    quality = quality
+                ) { prepPercent ->
                     updateProgress(track.id, DownloadProgress(track.id, prepPercent, 0, 0, DownloadStatus.DOWNLOADING))
                     DownloadService.startOrUpdate(context, "${track.artist} — ${track.title}", prepPercent)
                 }
@@ -211,7 +218,11 @@ class AudioDownloadManager(
                 } catch (e: Exception) {
                     if (downloadAttempts >= 3) throw e
                     delay(1500)
-                    val refreshedUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id, forDownload = true)
+                    val refreshedUrl = AudioStreamResolver.resolveAudioStreamUrl(
+                        videoId = track.id,
+                        forDownload = true,
+                        quality = quality
+                    )
                     if (!refreshedUrl.isNullOrBlank()) {
                         directStreamUrl = refreshedUrl
                     }
@@ -220,6 +231,12 @@ class AudioDownloadManager(
 
             // Атомарно переименовываем в финальный файл
             if (tempFile.exists() && tempFile.length() > 0) {
+                // Удаляем файлы других форматов для этого trackId, если они существовали ранее
+                File(musicDirectory, "${track.id}.mp3").takeIf { it.exists() && it != finalFile }?.delete()
+                File(musicDirectory, "${track.id}.m4a").takeIf { it.exists() && it != finalFile }?.delete()
+                File(musicDirectory, "${track.id}.opus").takeIf { it.exists() && it != finalFile }?.delete()
+                File(musicDirectory, "${track.id}.webm").takeIf { it.exists() && it != finalFile }?.delete()
+
                 if (finalFile.exists()) finalFile.delete()
                 tempFile.renameTo(finalFile)
             } else {

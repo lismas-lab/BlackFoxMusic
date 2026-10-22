@@ -46,11 +46,13 @@ object AudioStreamResolver {
     suspend fun resolveAudioStreamUrl(
         videoId: String,
         forDownload: Boolean = false,
+        quality: String = if (forDownload) "320" else "standard",
         onProgress: ((Int) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
         // 0. Проверяем кэш предварительно разрешенных ссылок для мгновенного старта (0 мс)
+        val cacheKey = "$videoId:$quality:$forDownload"
         synchronized(streamUrlCache) {
-            val cached = streamUrlCache[videoId]
+            val cached = streamUrlCache[cacheKey]
             if (cached != null && (System.currentTimeMillis() - cached.timestamp) < CACHE_TTL_MS) {
                 onProgress?.invoke(25)
                 return@withContext cached.url
@@ -70,17 +72,11 @@ object AudioStreamResolver {
 
             val audioStreams = extractor.audioStreams
             if (!audioStreams.isNullOrEmpty()) {
-                // Для загрузки отдаем приоритет нативному M4A (AAC) как самому быстрому и аппаратно аппаратному на Android
-                val m4aStream = audioStreams.filter {
-                    it.format?.suffix?.equals("m4a", ignoreCase = true) == true ||
-                            it.codec?.contains("mp4a", ignoreCase = true) == true
-                }.maxByOrNull { it.bitrate }
-
-                val bestAudio = m4aStream ?: audioStreams.maxByOrNull { it.bitrate }
-                val url = bestAudio?.content ?: bestAudio?.url
+                val selectedAudio = selectAudioStream(audioStreams, quality, forDownload)
+                val url = selectedAudio?.content ?: selectedAudio?.url
                 if (!url.isNullOrBlank()) {
                     synchronized(streamUrlCache) {
-                        streamUrlCache[videoId] = CachedUrl(url, System.currentTimeMillis())
+                        streamUrlCache[cacheKey] = CachedUrl(url, System.currentTimeMillis())
                     }
                     onProgress?.invoke(25)
                     return@withContext url
@@ -90,7 +86,7 @@ object AudioStreamResolver {
             val hls = extractor.hlsUrl
             if (!hls.isNullOrBlank()) {
                 synchronized(streamUrlCache) {
-                    streamUrlCache[videoId] = CachedUrl(hls, System.currentTimeMillis())
+                    streamUrlCache[cacheKey] = CachedUrl(hls, System.currentTimeMillis())
                 }
                 onProgress?.invoke(25)
                 return@withContext hls
@@ -108,9 +104,12 @@ object AudioStreamResolver {
         // 2. Резервный Fallback для скачивания: если NewPipe не смог отдать прямой поток
         // (например, при временных ограничениях CDN), обращаемся к стороннему Loader API
         try {
-            val mp3Url = resolveFromLoaderApi(videoId, onProgress)
-            if (!mp3Url.isNullOrBlank()) {
-                return@withContext mp3Url
+            val fallbackUrl = resolveFromLoaderApi(videoId, quality, onProgress)
+            if (!fallbackUrl.isNullOrBlank()) {
+                synchronized(streamUrlCache) {
+                    streamUrlCache[cacheKey] = CachedUrl(fallbackUrl, System.currentTimeMillis())
+                }
+                return@withContext fallbackUrl
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -119,13 +118,74 @@ object AudioStreamResolver {
         null
     }
 
+    private fun selectAudioStream(
+        audioStreams: List<org.schabi.newpipe.extractor.stream.AudioStream>,
+        quality: String,
+        forDownload: Boolean
+    ): org.schabi.newpipe.extractor.stream.AudioStream? {
+        if (audioStreams.isEmpty()) return null
+
+        return when (quality) {
+            "low" -> {
+                // Экономия / быстрый старт на медленной сети: выбираем поток с битрейтом <= 128 kbps (48..128 kbps)
+                val lowStreams = audioStreams.filter { it.bitrate in 40..128 }
+                lowStreams.minByOrNull { it.bitrate }
+                    ?: audioStreams.minByOrNull { it.bitrate }
+            }
+            "192", "standard" -> {
+                // Стандартное качество (128 - 192 kbps):
+                // Ищем аудиопоток в диапазоне 110-192 kbps
+                val midStreams = audioStreams.filter { it.bitrate in 110..192 }
+                if (forDownload) {
+                    // Для загрузки 192 kbps отдаем приоритет нативному M4A (AAC 128 kbps, размер ~3.3 МБ)
+                    val m4aMid = midStreams.filter {
+                        it.format?.suffix?.equals("m4a", ignoreCase = true) == true ||
+                                it.codec?.contains("mp4a", ignoreCase = true) == true
+                    }.maxByOrNull { it.bitrate }
+
+                    m4aMid
+                        ?: midStreams.maxByOrNull { it.bitrate }
+                        ?: audioStreams.filter { it.bitrate <= 192 }.maxByOrNull { it.bitrate }
+                        ?: audioStreams.minByOrNull { it.bitrate }
+                } else {
+                    midStreams.maxByOrNull { it.bitrate }
+                        ?: audioStreams.filter { it.bitrate <= 192 }.maxByOrNull { it.bitrate }
+                        ?: audioStreams.minByOrNull { it.bitrate }
+                }
+            }
+            "256" -> {
+                // Высокое качество (256 kbps):
+                // Если доступен поток >= 200 kbps (например itag 141 AAC 256k / itag 172 Vorbis 256k), берем его.
+                // Иначе - наивысший доступный битрейт
+                val highStreams = audioStreams.filter { it.bitrate >= 200 }
+                highStreams.maxByOrNull { it.bitrate }
+                    ?: audioStreams.maxByOrNull { it.bitrate }
+            }
+            "320", "high" -> {
+                // Максимальное качество: абсолютный максимум битрейта (Opus 160k или AAC 256k)
+                audioStreams.maxByOrNull { it.bitrate }
+            }
+            else -> {
+                audioStreams.maxByOrNull { it.bitrate }
+            }
+        }
+    }
+
     private suspend fun resolveFromLoaderApi(
         videoId: String,
+        quality: String = "320",
         onProgress: ((Int) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
         try {
             onProgress?.invoke(5)
-            val initUrl = "https://loader.to/ajax/download.php?format=mp3&url=https://www.youtube.com/watch?v=$videoId"
+            // При выборе 320 kbps (или high) скачиваем MP3 320 kbps CBR (~11 МБ).
+            // При выборе 192 kbps (или standard / low) скачиваем M4A AAC 128 kbps (~3.3 МБ).
+            // При выборе 256 kbps скачиваем MP3.
+            val format = when (quality) {
+                "320", "256", "high" -> "mp3"
+                else -> "m4a"
+            }
+            val initUrl = "https://loader.to/ajax/download.php?format=$format&url=https://www.youtube.com/watch?v=$videoId"
             val req1 = Request.Builder()
                 .url(initUrl)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")

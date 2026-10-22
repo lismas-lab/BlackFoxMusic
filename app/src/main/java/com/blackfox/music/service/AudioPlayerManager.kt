@@ -31,6 +31,7 @@ import androidx.media3.session.SessionResult
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import com.blackfox.music.data.local.AppSettings
 import com.blackfox.music.data.network.AudioStreamResolver
 import com.blackfox.music.domain.model.Track
 import com.blackfox.music.presentation.MainActivity
@@ -62,6 +63,7 @@ object MediaCacheManager {
 
 class AudioPlayerManager(
     private val context: Context,
+    private val appSettings: AppSettings? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 ) {
 
@@ -361,8 +363,13 @@ class AudioPlayerManager(
         }
 
         // 2. Онлайн воспроизведение через прямой поток (ExoPlayer) с фоновым сервисом
+        val streamQuality = appSettings?.getStreamQuality() ?: "standard"
         streamResolveJob = scope.launch(Dispatchers.IO) {
-            val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(track.id, forDownload = false)
+            val directStreamUrl = AudioStreamResolver.resolveAudioStreamUrl(
+                videoId = track.id,
+                forDownload = false,
+                quality = streamQuality
+            )
             withContext(Dispatchers.Main) {
                 // Убеждаемся, что за время загрузки ссылки пользователь не переключил на другой трек
                 if (_currentTrack.value?.id != track.id) {
@@ -404,8 +411,13 @@ class AudioPlayerManager(
                 ) {
                     return@launch
                 }
-                // Фоновое упреждающее разрешение ссылки следующего трека
-                AudioStreamResolver.resolveAudioStreamUrl(nextTrack.id, forDownload = false)
+                // Фоновое упреждающее разрешение ссылки следующего трека с учетом настроек качества
+                val streamQuality = appSettings?.getStreamQuality() ?: "standard"
+                AudioStreamResolver.resolveAudioStreamUrl(
+                    videoId = nextTrack.id,
+                    forDownload = false,
+                    quality = streamQuality
+                )
             }
         }
     }

@@ -47,6 +47,9 @@ class AppSettings(context: Context) {
     )
     val downloadQuality: StateFlow<String> = _downloadQuality.asStateFlow()
 
+    fun getStreamQuality(): String = _streamQuality.value
+    fun getDownloadQuality(): String = _downloadQuality.value
+
     fun setAccent(theme: AccentTheme) {
         prefs.edit().putString(KEY_ACCENT, theme.key).apply()
         _currentAccent.value = theme

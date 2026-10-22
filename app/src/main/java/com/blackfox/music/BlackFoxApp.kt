@@ -28,8 +28,8 @@ class BlackFoxApp : Application() {
         super.onCreate()
         appSettings = AppSettings(this)
         database = MusicDatabase.getInstance(this)
-        downloadManager = AudioDownloadManager(this, database.musicDao())
+        downloadManager = AudioDownloadManager(this, database.musicDao(), appSettings)
         playlistRepository = PlaylistRepository(this, database.musicDao(), downloadManager)
-        playerManager = AudioPlayerManager(this)
+        playerManager = AudioPlayerManager(this, appSettings)
     }
 }
