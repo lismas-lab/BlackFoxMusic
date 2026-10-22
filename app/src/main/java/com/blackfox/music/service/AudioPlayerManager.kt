@@ -3,8 +3,6 @@ package com.blackfox.music.service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Environment
 import androidx.annotation.OptIn
@@ -25,9 +23,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionResult
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
 import com.blackfox.music.data.local.AppSettings
 import com.blackfox.music.data.network.AudioStreamResolver
 import com.blackfox.music.domain.model.Track
@@ -36,7 +31,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.ByteArrayOutputStream
 import java.io.File
 
 class AudioPlayerManager(
@@ -66,10 +60,10 @@ class AudioPlayerManager(
     @OptIn(UnstableApi::class)
     private val fastLoadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            /* minBufferMs = */ 15_000,
-            /* maxBufferMs = */ 50_000,
-            /* bufferForPlaybackMs = */ 1_000, // 1 секунда буфера для моментального и стабильного старта
-            /* bufferForPlaybackAfterRebufferMs = */ 2_000
+            /* minBufferMs = */ 10_000,
+            /* maxBufferMs = */ 40_000,
+            /* bufferForPlaybackMs = */ 500, // 500 мс буфера (~8-10 КБ) для моментального старта воспроизведения
+            /* bufferForPlaybackAfterRebufferMs = */ 1_500
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .setBackBuffer(20_000, true) // Сохраняем 20 сек обратного буфера для плавной перемотки назад
@@ -135,6 +129,7 @@ class AudioPlayerManager(
                             _isLoadingAudio.value = false
                             val duration = player.duration
                             if (duration > 0) _totalDurationMs.value = duration
+                            preResolveNextTrack()
                         }
                         Player.STATE_BUFFERING -> _isLoadingAudio.value = true
                         Player.STATE_ENDED -> {
@@ -327,8 +322,6 @@ class AudioPlayerManager(
             player.setMediaItem(mediaItem)
             player.prepare()
             player.play()
-            loadArtwork(track)
-            preResolveNextTrack()
             return
         }
 
@@ -354,8 +347,6 @@ class AudioPlayerManager(
                     player.setMediaItem(mediaItem)
                     player.prepare()
                     player.play()
-                    loadArtwork(track)
-                    preResolveNextTrack()
                 } else {
                     // Fallback на WebView
                     activeEngine = PlaybackEngine.WEBVIEW
@@ -418,40 +409,6 @@ class AudioPlayerManager(
         }
 
         return builder.build()
-    }
-
-    private fun loadArtwork(track: Track) {
-        if (track.thumbnailUrl.isBlank()) return
-        scope.launch(Dispatchers.IO) {
-            try {
-                val req = ImageRequest.Builder(context)
-                    .data(track.thumbnailUrl)
-                    .size(512, 512)
-                    .build()
-                val result = (context.imageLoader.execute(req) as? SuccessResult)?.drawable
-                val bitmap = (result as? BitmapDrawable)?.bitmap
-                if (bitmap != null) {
-                    val stream = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                    val artworkBytes = stream.toByteArray()
-
-                    withContext(Dispatchers.Main) {
-                        val currentItem = player.currentMediaItem
-                        if (currentItem != null && currentItem.mediaId == track.id) {
-                            val updatedMetadata = currentItem.mediaMetadata.buildUpon()
-                                .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                                .build()
-                            val updatedItem = currentItem.buildUpon()
-                                .setMediaMetadata(updatedMetadata)
-                                .build()
-                            player.replaceMediaItem(player.currentMediaItemIndex, updatedItem)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // Игнорируем ошибку обложки
-            }
-        }
     }
 
     fun togglePlayPause() {
