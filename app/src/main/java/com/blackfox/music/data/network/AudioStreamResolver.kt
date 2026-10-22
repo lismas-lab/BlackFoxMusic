@@ -3,6 +3,7 @@ package com.blackfox.music.data.network
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -15,10 +16,20 @@ object AudioStreamResolver {
 
     private var isInitialized = false
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
+
+    // Кэш прямых ссылок на аудиопотоки (YouTube CDN ссылки живут 6 часов, кэшируем на 4 часа)
+    data class CachedUrl(val url: String, val timestamp: Long)
+    private val streamUrlCache = object : LinkedHashMap<String, CachedUrl>(100, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedUrl>?): Boolean {
+            return size > 150
+        }
+    }
+    private const val CACHE_TTL_MS = 4 * 60 * 60 * 1000L // 4 часа
 
     @Synchronized
     fun init() {
@@ -37,6 +48,15 @@ object AudioStreamResolver {
         forDownload: Boolean = false,
         onProgress: ((Int) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
+        // 0. Проверяем кэш предварительно разрешенных ссылок для мгновенного старта (0 мс)
+        synchronized(streamUrlCache) {
+            val cached = streamUrlCache[videoId]
+            if (cached != null && (System.currentTimeMillis() - cached.timestamp) < CACHE_TTL_MS) {
+                onProgress?.invoke(25)
+                return@withContext cached.url
+            }
+        }
+
         // 1. Первоочередно извлекаем нативный аудиопоток напрямую из Google CDN через NewPipeExtractor
         // Нативный поток m4a (AAC 128 kbps) или webm (Opus 160 kbps) стартует мгновенно (< 0.5 сек),
         // весит в 3 раза меньше MP3 (~3-4 МБ вместо 11 МБ), обеспечивает наивысшую скорость Google CDN
@@ -59,6 +79,9 @@ object AudioStreamResolver {
                 val bestAudio = m4aStream ?: audioStreams.maxByOrNull { it.bitrate }
                 val url = bestAudio?.content ?: bestAudio?.url
                 if (!url.isNullOrBlank()) {
+                    synchronized(streamUrlCache) {
+                        streamUrlCache[videoId] = CachedUrl(url, System.currentTimeMillis())
+                    }
                     onProgress?.invoke(25)
                     return@withContext url
                 }
@@ -66,6 +89,9 @@ object AudioStreamResolver {
 
             val hls = extractor.hlsUrl
             if (!hls.isNullOrBlank()) {
+                synchronized(streamUrlCache) {
+                    streamUrlCache[videoId] = CachedUrl(hls, System.currentTimeMillis())
+                }
                 onProgress?.invoke(25)
                 return@withContext hls
             }
