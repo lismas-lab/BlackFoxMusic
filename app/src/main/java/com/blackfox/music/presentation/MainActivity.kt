@@ -35,6 +35,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.blackfox.music.BlackFoxApp
+import com.blackfox.music.data.download.DownloadStatus
 import com.blackfox.music.data.local.TrackEntity
 import com.blackfox.music.data.local.toDomain
 import com.blackfox.music.data.network.InnerTubeRepository
@@ -167,6 +168,7 @@ class MainActivity : ComponentActivity() {
                 val downloadedCount by musicDao.getDownloadedCount().collectAsState(initial = 0)
                 val followedArtists by musicDao.getAllFollowedArtists().collectAsState(initial = emptyList())
                 val favoriteSet = remember(favoriteTrackIds) { favoriteTrackIds.toSet() }
+                val downloadedTrackIds = remember(downloadedTracks) { downloadedTracks.map { it.id }.toSet() }
 
                 // Полная коллекция сохраненных треков (из плейлистов, любимого и загруженных)
                 val allSavedTracks = remember(userPlaylists, favoriteTracks, userUploadedTracks) {
@@ -565,6 +567,7 @@ class MainActivity : ComponentActivity() {
                                             playlistRepository.updatePlaylistOrder(currentPlaylist.playlistId, orderedIds)
                                         }
                                     },
+                                    onDownloadTrack = { downloadManager.downloadTrack(it) },
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying
                                 )
@@ -641,6 +644,7 @@ class MainActivity : ComponentActivity() {
                                 onShuffle = { playFavorites(shuffle = true) },
                                 onToggleFavorite = { track -> toggleFavorite(track) },
                                 onAddToPlaylistClick = { track -> trackForPlaylistSheet = track },
+                                onDownloadTrack = { downloadManager.downloadTrack(it) },
                                 onReorderFavorites = { orderedIds -> reorderFavorites(orderedIds) },
                                 currentTrack = currentTrack,
                                 isPlaying = isPlaying
@@ -899,6 +903,8 @@ class MainActivity : ComponentActivity() {
                     ) {
                         currentTrack?.let { track ->
                             val isFav = favoriteSet.contains(track.id)
+                            val progress = downloadProgressMap[track.id]
+                            val isDl = downloadedTrackIds.contains(track.id) || track.isDownloaded || progress?.status == DownloadStatus.COMPLETED
 
                             FullPlayerSheet(
                                 track = track,
@@ -906,6 +912,8 @@ class MainActivity : ComponentActivity() {
                                 currentPositionMs = currentPositionMs,
                                 totalDurationMs = totalDurationMs,
                                 isFavorite = isFav,
+                                isDownloaded = isDl,
+                                downloadProgress = progress,
                                 onPlayPauseClick = { playerManager.togglePlayPause() },
                                 onPreviousClick = { playerManager.playPrevious() },
                                 onNextClick = { playerManager.playNext(loop = true) },

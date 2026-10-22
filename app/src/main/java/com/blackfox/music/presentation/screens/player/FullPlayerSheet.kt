@@ -29,6 +29,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.blackfox.music.data.download.DownloadProgress
+import com.blackfox.music.data.download.DownloadStatus
 import com.blackfox.music.data.local.LocalAccentTheme
 import com.blackfox.music.data.network.InnerTubeRepository
 import com.blackfox.music.domain.model.Track
@@ -47,6 +49,8 @@ fun FullPlayerSheet(
     currentPositionMs: Long,
     totalDurationMs: Long,
     isFavorite: Boolean,
+    isDownloaded: Boolean = false,
+    downloadProgress: DownloadProgress? = null,
     onPlayPauseClick: () -> Unit,
     onPreviousClick: () -> Unit,
     onNextClick: () -> Unit,
@@ -505,14 +509,61 @@ fun FullPlayerSheet(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Скачать для оффлайна
-                IconButton(onClick = onDownloadClick) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "Скачать",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(26.dp)
-                    )
+                // Скачать для оффлайна с круговым индикатором прогресса и статусом
+                val isDownloading = downloadProgress?.status == DownloadStatus.DOWNLOADING
+                val isCompleted = isDownloaded || track.isDownloaded || downloadProgress?.status == DownloadStatus.COMPLETED
+
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .clickable(
+                            enabled = !isDownloading && !isCompleted,
+                            onClick = onDownloadClick
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isDownloading) {
+                        val percent = downloadProgress?.progressPercent ?: 0
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(
+                                progress = { if (percent > 0) percent / 100f else 0.15f },
+                                color = accentColor,
+                                trackColor = ObsidianCard,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            if (percent > 0) {
+                                Text(
+                                    text = "$percent%",
+                                    color = accentColor,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Загрузка",
+                                    tint = accentColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    } else if (isCompleted) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Скачано",
+                            tint = accentColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Скачать",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
 
                 // Предыдущий трек
