@@ -16,12 +16,20 @@ import com.blackfox.music.data.network.VkTrack
 import com.blackfox.music.data.repository.PlaylistRepository
 import com.blackfox.music.domain.model.Track
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+enum class MigrationSearchFilter(val label: String) {
+    ALL("Все"),
+    SONGS("Песни"),
+    VIDEOS("Видео (без цензуры)")
+}
 
 /**
  * Элемент для экрана сопоставления треков
@@ -267,13 +275,45 @@ class VkMigrationViewModel(
     }
 
     /**
-     * Ручной поиск трека для замены или сопоставления ненайденного
+     * Ручной поиск трека для замены или сопоставления ненайденного.
+     * Поддерживает как официальные треки из каталога музыки, так и видеоклипы / версии без цензуры.
      */
-    suspend fun searchReplacement(query: String): List<Track> = withContext(Dispatchers.IO) {
+    suspend fun searchReplacement(
+        query: String,
+        filter: MigrationSearchFilter = MigrationSearchFilter.ALL
+    ): List<Track> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
-        runCatching {
-            innerTubeRepository.searchTracks(query.trim(), limit = 15)
-        }.getOrDefault(emptyList())
+        val q = query.trim()
+        when (filter) {
+            MigrationSearchFilter.ALL -> {
+                coroutineScope {
+                    val songsDef = async {
+                        runCatching { innerTubeRepository.searchTracks(q, limit = 15) }.getOrDefault(emptyList())
+                    }
+                    val videosDef = async {
+                        runCatching { innerTubeRepository.searchVideos(q, limit = 15) }.getOrDefault(emptyList())
+                    }
+                    val songs = songsDef.await()
+                    val videos = videosDef.await()
+
+                    val seenIds = mutableSetOf<String>()
+                    val combined = mutableListOf<Track>()
+                    for (s in songs) {
+                        if (seenIds.add(s.id)) combined.add(s)
+                    }
+                    for (v in videos) {
+                        if (seenIds.add(v.id)) combined.add(v)
+                    }
+                    combined
+                }
+            }
+            MigrationSearchFilter.SONGS -> {
+                runCatching { innerTubeRepository.searchTracks(q, limit = 25) }.getOrDefault(emptyList())
+            }
+            MigrationSearchFilter.VIDEOS -> {
+                runCatching { innerTubeRepository.searchVideos(q, limit = 25) }.getOrDefault(emptyList())
+            }
+        }
     }
 
     /**
@@ -319,7 +359,7 @@ class VkMigrationViewModel(
                         TrackEntity(
                             id = matched.id,
                             title = matched.title,
-                            artist = matched.artist,
+                            artist = if (matched.artist.isNotBlank() && matched.artist != "Unknown") matched.artist else item.vkTrack.artist,
                             album = matched.album,
                             albumId = matched.albumId,
                             duration = matched.duration,
@@ -355,7 +395,7 @@ class VkMigrationViewModel(
                                 TrackEntity(
                                     id = matched.id,
                                     title = matched.title,
-                                    artist = matched.artist,
+                                    artist = if (matched.artist.isNotBlank() && matched.artist != "Unknown") matched.artist else t.artist,
                                     album = matched.album,
                                     albumId = matched.albumId,
                                     duration = matched.duration,
@@ -445,7 +485,7 @@ class VkMigrationViewModel(
     }
 
     /**
-     * Интеллектуальный поиск трека VK в каталоге InnerTube
+     * Интеллектуальный поиск трека VK в каталоге InnerTube (Песни + Видео)
      */
     private suspend fun matchVkTrack(vkTrack: VkTrack): Track? = withContext(Dispatchers.IO) {
         val existingEntity = musicDao.findTrackByTitleAndArtist(vkTrack.title, vkTrack.artist)
@@ -455,18 +495,20 @@ class VkMigrationViewModel(
 
         val candidates = mutableListOf<Track>()
 
-        // 1. Полнотекстовый поиск по артисту и названию
+        // 1. Полнотекстовый поиск по артисту и названию среди официальных треков
         val qStandard = "${vkTrack.artist} ${vkTrack.title}"
         val res1 = runCatching { innerTubeRepository.searchTracks(qStandard, limit = 8) }.getOrDefault(emptyList())
         candidates.addAll(res1)
 
+        val cleanTitle = vkTrack.title
+            .replace(Regex("(?i)\\((?:remaster(?:ed)?|feat\\.?|live|club|edit|remix|acoustic|radio).*?\\)"), "")
+            .replace(Regex("(?i)\\[(?:remaster(?:ed)?|feat\\.?|live|club|edit|remix|acoustic|radio).*?\\]"), "")
+            .trim()
+        val hasCleanTitle = cleanTitle != vkTrack.title && cleanTitle.isNotBlank()
+
         // 2. Если результатов мало или нет совпадений - пробуем очищенную версию названия (без скобок и пометок)
         if (candidates.isEmpty() || candidates.all { scoreCandidateMatch(it, vkTrack) < 35 }) {
-            val cleanTitle = vkTrack.title
-                .replace(Regex("(?i)\\((?:remaster(?:ed)?|feat\\.?|live|club|edit|remix|acoustic|radio).*?\\)"), "")
-                .replace(Regex("(?i)\\[(?:remaster(?:ed)?|feat\\.?|live|club|edit|remix|acoustic|radio).*?\\]"), "")
-                .trim()
-            if (cleanTitle != vkTrack.title && cleanTitle.isNotBlank()) {
+            if (hasCleanTitle) {
                 val qClean = "${vkTrack.artist} $cleanTitle"
                 val res2 = runCatching { innerTubeRepository.searchTracks(qClean, limit = 6) }.getOrDefault(emptyList())
                 candidates.addAll(res2)
@@ -478,6 +520,18 @@ class VkMigrationViewModel(
             val qAlbum = "${vkTrack.artist} ${vkTrack.title} ${vkTrack.album}"
             val res3 = runCatching { innerTubeRepository.searchTracks(qAlbum, limit = 6) }.getOrDefault(emptyList())
             candidates.addAll(res3)
+        }
+
+        // 4. Поиск по видеоклипам / видео (если среди официальных треков не нашлось надежного совпадения)
+        if (candidates.isEmpty() || candidates.all { scoreCandidateMatch(it, vkTrack) < 35 }) {
+            val resVideo = runCatching { innerTubeRepository.searchVideos(qStandard, limit = 8) }.getOrDefault(emptyList())
+            candidates.addAll(resVideo)
+
+            if ((candidates.isEmpty() || candidates.all { scoreCandidateMatch(it, vkTrack) < 35 }) && hasCleanTitle) {
+                val qClean = "${vkTrack.artist} $cleanTitle"
+                val resVideoClean = runCatching { innerTubeRepository.searchVideos(qClean, limit = 6) }.getOrDefault(emptyList())
+                candidates.addAll(resVideoClean)
+            }
         }
 
         if (candidates.isEmpty()) {
@@ -500,7 +554,9 @@ class VkMigrationViewModel(
             bestCandidate
         } else {
             val first = candidates.firstOrNull()
-            if (first != null && (first.artist.contains(vkTrack.artist, ignoreCase = true) || vkTrack.artist.contains(first.artist, ignoreCase = true))) {
+            if (first != null && (first.artist.contains(vkTrack.artist, ignoreCase = true) ||
+                        vkTrack.artist.contains(first.artist, ignoreCase = true) ||
+                        first.title.contains(vkTrack.artist, ignoreCase = true))) {
                 first
             } else null
         }
@@ -517,6 +573,9 @@ class VkMigrationViewModel(
             score += 50
         } else if (candArtist.contains(targetArtist) || targetArtist.contains(candArtist)) {
             score += 30
+        } else if (candTitle.contains(targetArtist)) {
+            // В видеоклипах имя артиста часто находится в самом названии видео ("Артист - Трек")
+            score += 25
         }
 
         val cleanCandTitle = candTitle.replace(Regex("[()\\[\\]{}.,!?-]"), "").trim()

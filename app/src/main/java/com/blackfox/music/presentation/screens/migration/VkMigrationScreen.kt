@@ -178,7 +178,7 @@ fun VkMigrationScreen(
                             },
                             onCancel = { viewModel.reset() },
                             onUpdateTrack = { vkId, track -> viewModel.updateMatchedTrack(vkId, track) },
-                            onSearchReplacement = { q -> viewModel.searchReplacement(q) },
+                            onSearchReplacement = { q, filter -> viewModel.searchReplacement(q, filter) },
                             accentColor = accentColor
                         )
                     }
@@ -898,7 +898,7 @@ private fun ReviewMatchingContent(
     onApply: (List<MigrationReviewItem>) -> Unit,
     onCancel: () -> Unit,
     onUpdateTrack: (Long, Track?) -> Unit,
-    onSearchReplacement: suspend (String) -> List<Track>,
+    onSearchReplacement: suspend (String, MigrationSearchFilter) -> List<Track>,
     accentColor: Color
 ) {
     var selectedFilter by remember { mutableStateOf(ReviewFilter.ALL) }
@@ -1269,14 +1269,33 @@ private fun ReviewTrackRow(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = matched.title,
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = matched.title,
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (matched.album == "Видео / Без цензуры") {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0x33FF5252))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "ВИДЕО",
+                                        color = Color(0xFFFF5252),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = "${matched.artist} • ${matched.duration}",
                             color = TextSecondary,
@@ -1358,19 +1377,26 @@ private fun ManualSearchDialog(
     onDismiss: () -> Unit,
     onSelectTrack: (Track) -> Unit,
     onClearMatch: () -> Unit,
-    onSearch: suspend (String) -> List<Track>,
+    onSearch: suspend (String, MigrationSearchFilter) -> List<Track>,
     accentColor: Color
 ) {
     var searchQuery by remember { mutableStateOf("${item.vkTrack.artist} ${item.vkTrack.title}") }
+    var selectedFilter by remember { mutableStateOf(MigrationSearchFilter.ALL) }
     var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    fun triggerSearch(q: String, f: MigrationSearchFilter) {
+        scope.launch {
+            isSearching = true
+            searchResults = onSearch(q, f)
+            isSearching = false
+        }
+    }
+
     // Автоматический первичный поиск при открытии
     LaunchedEffect(Unit) {
-        isSearching = true
-        searchResults = onSearch(searchQuery)
-        isSearching = false
+        triggerSearch(searchQuery, selectedFilter)
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -1431,13 +1457,7 @@ private fun ManualSearchDialog(
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(
-                            onClick = {
-                                scope.launch {
-                                    isSearching = true
-                                    searchResults = onSearch(searchQuery)
-                                    isSearching = false
-                                }
-                            },
+                            onClick = { triggerSearch(searchQuery, selectedFilter) },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(imageVector = Icons.Default.Search, contentDescription = "Искать", tint = accentColor)
@@ -1445,7 +1465,40 @@ private fun ManualSearchDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Фильтры поиска: Все / Песни / Видео (без цензуры)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    MigrationSearchFilter.entries.forEach { filter ->
+                        val isSelected = selectedFilter == filter
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) accentColor else Color(0x18FFFFFF))
+                                .clickable {
+                                    if (selectedFilter != filter) {
+                                        selectedFilter = filter
+                                        triggerSearch(searchQuery, filter)
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = filter.label,
+                                color = if (isSelected) ObsidianBlack else TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
 
                 // Кнопка очистки сопоставления
                 if (item.matchedTrack != null) {
@@ -1484,6 +1537,7 @@ private fun ManualSearchDialog(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             items(searchResults, key = { it.id }) { track ->
+                                val isVideo = track.album == "Видео / Без цензуры" || track.artistId?.startsWith("UC") == true
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1493,24 +1547,63 @@ private fun ManualSearchDialog(
                                         .padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    AsyncImage(
-                                        model = track.thumbnailUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                    )
+                                    Box(modifier = Modifier.size(42.dp)) {
+                                        AsyncImage(
+                                            model = track.thumbnailUrl,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(6.dp))
+                                        )
+                                        if (isVideo) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                    .size(16.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xCC000000)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Videocam,
+                                                    contentDescription = "Видео",
+                                                    tint = Color(0xFFFF5252),
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = track.title,
-                                            color = TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = track.title,
+                                                color = TextPrimary,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            if (isVideo) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(Color(0x33FF5252))
+                                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "ВИДЕО",
+                                                        color = Color(0xFFFF5252),
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = "${track.artist} • ${track.duration}",
                                             color = TextSecondary,
